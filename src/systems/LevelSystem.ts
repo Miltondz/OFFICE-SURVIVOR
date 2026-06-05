@@ -3,13 +3,21 @@ import { CHAR } from '@/config/characters.config';
 import type { RunContext } from './RunContext';
 import type { EnemyType } from '@/types';
 
+/**
+ * §7.6: Super-linear XP curve.
+ * xpToNext = round(XP_BASE * level ^ XP_EXP)
+ *
+ * Level-up now opens the PlayerUpgrade overlay (player stat choices),
+ * NOT the item/weapon UpgradePool overlay.
+ */
 export class LevelSystem {
   private ctx: RunContext;
   private scene: Phaser.Scene;
   private pendingLevels = 0;
   private upgradeInProgress = false;
   private inboxZeroKills = 0;  // track for Inbox Zero item
-  private nextWeaponsOnly = false;  // starting choice: restrict pool to weapons
+  private nextWeaponsOnly = false;  // starting choice: restrict pool to weapons (still items)
+  private nextIsStatUpgrade = false; // whether pending level-ups open stat overlay
 
   constructor(scene: Phaser.Scene, ctx: RunContext) {
     this.scene = scene;
@@ -56,18 +64,24 @@ export class LevelSystem {
     this.upgradeInProgress = false;
   }
 
-  /** Grant an upgrade choice without an XP level-up (starting pick, per-wave reward). */
-  grantUpgrade(weaponsOnly = false): void {
+  /**
+   * Grant an upgrade choice without an XP level-up (starting pick, map drop).
+   * @param weaponsOnly – restrict to weapons (starting weapon pick)
+   * @param statUpgrade – open player-stat overlay instead of item/weapon overlay
+   */
+  grantUpgrade(weaponsOnly = false, statUpgrade = false): void {
     if (weaponsOnly) this.nextWeaponsOnly = true;
+    if (statUpgrade) this.nextIsStatUpgrade = true;
     this.pendingLevels++;
   }
 
-  private xpToNext(level: number): number {
-    let req = level * PROGRESSION.XP_PER_LEVEL_MULTIPLIER;
+  /** §7.6 — super-linear XP curve. */
+  xpToNext(level: number): number {
+    let req = Math.round(PROGRESSION.XP_BASE * Math.pow(level, PROGRESSION.XP_EXP));
     // Becario "Curva de Aprendizaje": each level needs 10% less XP, cap -50%.
     if (this.ctx.character.learningCurve) {
       const reduction = Math.min(CHAR.LEARNING_CURVE_CAP, CHAR.LEARNING_CURVE_STEP * (level - 1));
-      req *= (1 - reduction);
+      req = Math.round(req * (1 - reduction));
     }
     return req;
   }
@@ -83,13 +97,29 @@ export class LevelSystem {
   private openUpgradeOverlay(): void {
     const count = this.optionCount;
     const weaponsOnly = this.nextWeaponsOnly;
+    const statUpgrade = this.nextIsStatUpgrade || !weaponsOnly;
     this.nextWeaponsOnly = false;
-    this.scene.scene.launch(SCENES.UPGRADE_OVERLAY, {
-      ctx: this.ctx,
-      optionCount: count,
-      weaponsOnly,
-      onDone: () => { this.onUpgradeDone(); },
-    });
+    this.nextIsStatUpgrade = false;
+
+    if (statUpgrade) {
+      // §7.2 — open player-upgrade overlay (stat picks only)
+      this.scene.scene.launch(SCENES.UPGRADE_OVERLAY, {
+        ctx: this.ctx,
+        optionCount: count,
+        weaponsOnly: false,
+        playerUpgradeMode: true,
+        onDone: () => { this.onUpgradeDone(); },
+      });
+    } else {
+      // Starting weapon pick or (legacy) item pick
+      this.scene.scene.launch(SCENES.UPGRADE_OVERLAY, {
+        ctx: this.ctx,
+        optionCount: count,
+        weaponsOnly,
+        playerUpgradeMode: false,
+        onDone: () => { this.onUpgradeDone(); },
+      });
+    }
     this.scene.scene.pause();
   }
 }

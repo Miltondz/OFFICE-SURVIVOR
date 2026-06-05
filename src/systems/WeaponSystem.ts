@@ -148,7 +148,8 @@ export class WeaponSystem {
 
       const fireRate = def.fireRate
         * (1 + (inst.level - 1) * COMBAT.WEAPON_LEVEL_FIRERATE_STEP)
-        * inst.fireRateMult;
+        * inst.fireRateMult
+        * this.ctx.modifiers.fireRateMult;  // §7.2 stat_firerate upgrade
       const cooldown = 1000 / fireRate;
 
       if (time - inst.lastFiredAt < cooldown) continue;
@@ -361,7 +362,9 @@ export class WeaponSystem {
     let isCrit = false;
     const burnoutCrit = this.ctx.character.critInBurnout
       && this.ctx.player.stress >= 90 && this.ctx.player.stress <= 99;
-    if (def.id !== 'debug_laser' && (burnoutCrit || Math.random() < COMBAT.CRIT_CHANCE)) {
+    // §7.2 critBonus adds flat % to base crit chance
+    const effectiveCritChance = COMBAT.CRIT_CHANCE + (this.ctx.modifiers.critBonus ?? 0);
+    if (def.id !== 'debug_laser' && (burnoutCrit || Math.random() < effectiveCritChance)) {
       dmg *= COMBAT.CRIT_MULTIPLIER;
       isCrit = true;
     }

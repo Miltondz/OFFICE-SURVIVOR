@@ -37,12 +37,29 @@ export const WAVES = {
   BASE_ENEMIES: 2,
   ENEMIES_PER_WAVE_MULTIPLIER: 2.5, // era 3 — escala demasiado rápido; con per-wave upgrades el jugador se fortalece pero las hordas crecían cuadráticamente (balance v1)
   BOSS_WAVE: 10,
+  // §7.5 budget-based spawn system
+  BASE_BUDGET: 8,          // spawn points at wave 0
+  BUDGET_GROWTH: 5,        // +pts per wave
+  ELITE_COST: 3,           // points cost for an elite spawn
+  ELITE_CHANCE_BASE: 0.0,
+  ELITE_CHANCE_PER_WAVE: 0.06,
+  ELITE_CHANCE_MAX: 0.5,
+  ELITE_MIN_WAVE: 3,       // elites appear from wave 3
+  SPEED_SCALE_PER_WAVE: 0.05,
+  SPEED_SCALE_MAX: 0.5,    // capped at +50% speed
+  SPAWN_INTERVAL_BASE: 0.5,
+  SPAWN_INTERVAL_MIN: 0.18,
+  INTERMISSION_S: 4,       // countdown seconds before next wave
 } as const;
 
 export const PROGRESSION = {
   XP_PER_LEVEL_MULTIPLIER: 120, // era 100 — con per-wave upgrades el jugador sobre-nivelaba; ralentizar XP mantiene total de upgrades razonable (balance v1)
   XP_PER_HP_DIVISOR: 10,        // HP_enemigo / 10
   UPGRADE_OPTIONS: 3,
+  // §7.6 super-linear XP curve
+  XP_BASE: 26,           // xpToNext = round(XP_BASE * level^XP_EXP)
+  XP_EXP: 1.45,
+  XP_KILL_MULT: 2,       // multiplier on base xpValue from enemy def
 } as const;
 
 export const ECONOMY = {
@@ -66,6 +83,18 @@ export const SCENES = {
   HUD: 'HUDScene',
   STATISTICS: 'StatisticsScene',
   BUILD_REPORT: 'BuildReportScene',
+  PAUSE: 'PauseScene',
+  SHOP: 'ShopOverlay',
+} as const;
+
+export const SHOP = {
+  PRICE_COMMON: 20,
+  PRICE_RARE: 45,
+  PRICE_EPIC: 80,
+  PRICE_LEGENDARY: 140,
+  PRICE_WEAPON_LEVELUP: 20,   // same as common — costs PRICE_COMMON to level up existing weapon
+  REROLL_COST: 15,
+  CARD_COUNT: 4,
 } as const;
 
 export const BUILD_REPORT = {
@@ -108,7 +137,11 @@ export const MAP = {
   FUNC_SIZE: 40,
   COFFEE_COLOR: 0x8d6e63,
   VENDING_COLOR: 0x3949ab,
-  EXTINTOR_COLOR: 0xd32f2f,
+  EXTINTOR_COLOR: 0x00bcd4,     // cian — distinto del rojo de enemigos
+  EXTINTOR_BORDER: 0xffffff,
+  // Alto en pantalla de cada prop con sprite (px); el ancho conserva el aspecto del arte.
+  // El collider sigue usando w/h de arriba (gameplay); el sprite es solo visual y puede ser mayor.
+  SPRITE_H: { desk: 46, cabinet: 64, plant: 54, coffee: 56, vending: 86, extintor: 40 },
 } as const;
 
 export const CURSES = {
@@ -178,6 +211,14 @@ export const BOSS = {
   CEO_MEMO_BOSS_HP_MULT: 1.5,       // ceo_memo: CEO boss HP ×1.5
   CONTACT_DAMAGE: 20,               // damage to player on CEO body contact
   CONTACT_RANGE: 48,                // px distance for CEO contact damage
+  // Hoja de sprites del CEO: 4 columnas × 2 filas (frame 344×384, total 1376×768).
+  // Fila0 = fase1 [idle, enojado, ataque-bastón, lanza-emails]; fila1 = fase2 [idle, oscuro, rugido, ORO].
+  SHEET_FRAME_W: 344, SHEET_FRAME_H: 384,
+  DISPLAY_H: 120,                   // alto en pantalla del sprite (px)
+  IDLE_P1: [0, 1], IDLE_P2: [4, 6], // frames de idle por fase (parpadeo lento)
+  ATTACK_P1: 3, ATTACK_P2: 6,       // frame mostrado al atacar por fase
+  GOLD_FRAME: 7,                    // montón de oro (muerte)
+  ANIM_FPS: 2,
 } as const;
 
 export const RARITY_WEIGHTS = {
@@ -217,8 +258,10 @@ export const COLORS_GAME = {
 } as const;
 
 export const HUD = {
-  HP_BAR: { x: 12, y: 12, w: 200, h: 16 },
-  STRESS_BAR: { x: 12, y: 34, w: 200, h: 16 },
+  // Each bar has its label drawn just above it (origin 0,1). Spacing leaves room for the
+  // label between bars so HP bar / ESTRÉS label never overlap.
+  HP_BAR: { x: 12, y: 24, w: 200, h: 14 },
+  STRESS_BAR: { x: 12, y: 74, w: 200, h: 14 },   // bajada: la imagen de HP mide ~27px de alto
   XP_BAR: { w: 400, h: 8, yFromBottom: 18 },
   PULSE_MS: 400,
   PULSE_ALPHA_MIN: 0.6,
@@ -287,8 +330,12 @@ export const PICKUPS = {
   GALLETA_HP: 20,
   MONEDA_INTERVAL_S: 30,
   MONEDA_COINS: 5,
-  POOL_SIZE: 30,
+  POOL_SIZE: 40,                   // enlarged for item/upgrade drops (era 30)
   CAFE_VIP_BONUS_HP: 10,           // cafeteria_vip: café cura +10 HP
   STRESS_PICKUP_DECREASE: 10,      // reunion_cancelada drop
   SPAWN_MARGIN: 60,                // min distance from edges for pickup spawn
+  // §7.4 enemy death drops
+  ITEM_DROP_CHANCE: 0.04,          // probability on normal enemy death
+  ITEM_DROP_ELITE_MULT: 3,         // élite ×3 chance
+  UPGRADE_DROP_CHANCE: 0.015,      // upgrade star drop chance
 } as const;

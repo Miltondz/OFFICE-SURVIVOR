@@ -6,8 +6,9 @@ import type { PickupKind } from '@/entities/Pickup';
 import type { Player } from '@/entities/Player';
 
 /**
- * Manages map-consumable pickups (café, galleta, moneda, stress).
+ * Manages map-consumable pickups (café, galleta, moneda, stress, item, upgrade).
  * Pickups spawn on timed intervals; player overlap collects them.
+ * §7.4: enemy deaths can drop 'item' or 'upgrade' pickups.
  */
 export class PickupSystem {
   private scene: Phaser.Scene;
@@ -19,10 +20,23 @@ export class PickupSystem {
   private galletaTimer = 0;
   private monedaTimer = 0;
 
+  // Callbacks injected by GameScene for item/upgrade pickups
+  private onItemDrop: (() => void) | null = null;
+  private onUpgradeDrop: (() => void) | null = null;
+
   constructor(scene: Phaser.Scene, ctx: RunContext, player: Player) {
     this.scene = scene;
     this.ctx = ctx;
     this.player = player;
+  }
+
+  /** Called by GameScene to wire up item/upgrade drop callbacks. */
+  setDropCallbacks(
+    onItemDrop: () => void,
+    onUpgradeDrop: () => void,
+  ): void {
+    this.onItemDrop = onItemDrop;
+    this.onUpgradeDrop = onUpgradeDrop;
   }
 
   init(): void {
@@ -42,6 +56,11 @@ export class PickupSystem {
         this.collect(pickup);
       },
     );
+
+    // §7.4 Listen for enemy deaths to drop item/upgrade pickups
+    this.ctx.bus.on('enemy:killed', (p: { isElite: boolean; x: number; y: number }) => {
+      this.tryEnemyDrop(p.x, p.y, p.isElite);
+    });
   }
 
   update(delta: number): void {
@@ -83,6 +102,19 @@ export class PickupSystem {
     for (let i = 0; i < count; i++) this.spawnPickup('cafe');
   }
 
+  /** §7.4 — Chance to spawn an item or upgrade pickup on enemy death. */
+  private tryEnemyDrop(x: number, y: number, isElite: boolean): void {
+    const mult = isElite ? PICKUPS.ITEM_DROP_ELITE_MULT : 1;
+    const r = Math.random();
+    if (r < PICKUPS.UPGRADE_DROP_CHANCE * mult) {
+      const p = this.pickupPool.get(x, y) as Pickup | null;
+      if (p) p.spawn(x, y, 'upgrade');
+    } else if (r < (PICKUPS.UPGRADE_DROP_CHANCE + PICKUPS.ITEM_DROP_CHANCE) * mult) {
+      const p = this.pickupPool.get(x, y) as Pickup | null;
+      if (p) p.spawn(x, y, 'item');
+    }
+  }
+
   private spawnPickup(kind: PickupKind): void {
     const m = PICKUPS.SPAWN_MARGIN;
     const x = Phaser.Math.Between(m, GAME.WIDTH - m);
@@ -121,6 +153,20 @@ export class PickupSystem {
         this.ctx.player.stress = Math.max(0, this.ctx.player.stress - PICKUPS.STRESS_PICKUP_DECREASE);
         this.ctx.bus.emit('stress:changed', { value: this.ctx.player.stress });
         break;
+      }
+      case 'item': {
+        // §7.4 — grants a random eligible item (like the shop, free)
+        pickup.deactivate();
+        this.ctx.bus.emit('pickup:collected', { kind: 'item', coins: 0 });
+        if (this.onItemDrop) this.onItemDrop();
+        return;
+      }
+      case 'upgrade': {
+        // §7.4 — opens a player-upgrade choice
+        pickup.deactivate();
+        this.ctx.bus.emit('pickup:collected', { kind: 'upgrade', coins: 0 });
+        if (this.onUpgradeDrop) this.onUpgradeDrop();
+        return;
       }
     }
     pickup.deactivate();

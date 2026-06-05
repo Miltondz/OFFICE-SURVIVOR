@@ -5,6 +5,7 @@ import { EventBus } from './EventBus';
 import { getItemById } from '@/config/items.config';
 import { BASE_CHARACTER } from '@/config/characters.config';
 import { getCurseById } from '@/config/curses.config';
+import { PLAYER_UPGRADES } from '@/config/playerUpgrades.config';
 
 export interface RunContext {
   player: PlayerState;
@@ -29,6 +30,7 @@ export interface RunContext {
   curseForbidCommon: boolean;              // micromanagement: offered items rarity +1 (no commons)
   curseOpenOfficeAura: boolean;            // open_office: player aura slows nearby enemies
   curseHrEveryWave: boolean;               // open_office: HR Reps from wave 1
+  playerUpgradeIds: string[];              // mejoras de personaje adquiridas (se reaplican en recomputeModifiers)
 }
 
 export function createRunContext(): RunContext {
@@ -79,6 +81,7 @@ export function createRunContext(): RunContext {
     curseForbidCommon: false,
     curseOpenOfficeAura: false,
     curseHrEveryWave: false,
+    playerUpgradeIds: [],
   };
 }
 
@@ -99,6 +102,14 @@ export function recomputeModifiers(ctx: RunContext): void {
   if (ctx.curseId) {
     const curse = getCurseById(ctx.curseId);
     curse?.applyModifiers?.(m, ctx.player);
+  }
+  // Replay acquired player upgrades' MODIFIER effects (their PlayerState changes are already
+  // persistent). Use a throwaway player copy so hp/speed mutations are not double-applied.
+  if (ctx.playerUpgradeIds.length > 0) {
+    const dummy = { ...ctx.player };
+    for (const id of ctx.playerUpgradeIds) {
+      PLAYER_UPGRADES.find(u => u.id === id)?.apply(dummy, m);
+    }
   }
   ctx.modifiers = m;
 }

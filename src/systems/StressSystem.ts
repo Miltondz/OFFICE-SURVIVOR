@@ -36,12 +36,13 @@ export class StressSystem {
     }
   }
 
-  /** Multiplicative slow factor for all stress increases (ergonomia + auriculares_nc + meta stress_resist). */
+  /** Multiplicative slow factor for all stress increases (ergonomia + auriculares_nc + meta + §7.2 stat). */
   private stressIncreaseMult(): number {
     let mult = 1;
     if (this.ctx.player.items.includes('ergonomia')) mult *= STRESS.ERGONOMIA_MULT;
     if (this.ctx.player.items.includes('auriculares_nc')) mult *= STRESS.AURIC_NC_MULT;
-    mult *= this.ctx.metaStressMult; // meta upgrade: stress_resist (-20% per level)
+    mult *= this.ctx.metaStressMult;                       // meta upgrade: stress_resist
+    mult *= this.ctx.modifiers.stressRiseMult ?? 1;        // §7.2 stat_stress_resist upgrade
     return mult;
   }
 

@@ -6,9 +6,10 @@ export type EnemyType = 'angry_email' | 'toxic_manager' | 'angry_client'
 export type GameEventName =
   | 'player:hit' | 'player:died' | 'player:level_up' | 'player:burnout'
   | 'enemy:spawned' | 'enemy:killed' | 'enemy:hit'
-  | 'stress:changed' | 'wave:start' | 'wave:complete'
+  | 'stress:changed' | 'wave:start' | 'wave:complete' | 'wave:cleared'
   | 'pickup:collected' | 'boss:spawned' | 'boss:phase2' | 'boss:defeated'
-  | 'damage:dealt' | 'item:acquired' | 'upgrade:weapon_selected' | 'upgrade:item_selected';
+  | 'damage:dealt' | 'item:acquired' | 'upgrade:weapon_selected' | 'upgrade:item_selected'
+  | 'playerUpgrade:selected' | 'shop:closed' | 'boss:hp' | 'curse:applied';
 
 export interface CharacterDefinition {
   id: string;
@@ -40,7 +41,7 @@ export interface EnemyKilledPayload { type: EnemyType; isElite: boolean; x: numb
 export interface DamageDealtPayload { sourceId: string; amount: number; }
 export interface EnemyHitPayload { enemy: unknown; amount: number; sourceId: string; isCritical: boolean; }
 
-// Continuous combat modifiers aggregated from owned items.
+// Continuous combat modifiers aggregated from owned items + player upgrades.
 export interface RunModifiers {
   damageMult: number;           // multiplicative item damage bonus (NOT stress, NOT weapon level)
   damageTakenMult: number;      // <1 reduces incoming damage
@@ -52,6 +53,12 @@ export interface RunModifiers {
   maxWeapons: number;           // 4 base, 5 with Doble Monitor
   xpMult: number;
   coinMult: number;
+  // §7.2 player-upgrade fields (optional — 0/undefined = not upgraded)
+  fireRateMult: number;         // multiplier on all weapon fire rates
+  critBonus: number;            // added to base COMBAT.CRIT_CHANCE
+  regenHpPerS: number;          // HP regenerated per second passively
+  stressRiseMult: number;       // multiplier on all stress accrual (stacks with metaStressMult)
+  pickupRange: number;          // extra pickup detection radius in px
 }
 
 export function defaultRunModifiers(): RunModifiers {
@@ -59,6 +66,8 @@ export function defaultRunModifiers(): RunModifiers {
     damageMult: 1, damageTakenMult: 1, projectileBonus: 0,
     projectileSpeedMult: 1, rangeMult: 1, pierce: false, bounce: 0,
     maxWeapons: 4, xpMult: 1, coinMult: 1,
+    fireRateMult: 1, critBonus: 0, regenHpPerS: 0,
+    stressRiseMult: 1, pickupRange: 0,
   };
 }
 

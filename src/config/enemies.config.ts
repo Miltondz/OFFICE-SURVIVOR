@@ -18,3 +18,42 @@ export const ENEMIES: EnemyDefinition[] = [
 export function getEnemyById(id: string): EnemyDefinition | undefined {
   return ENEMIES.find(e => e.id === id);
 }
+
+// --- Hojas de sprites animadas de enemigos ---
+// Solo los ids cuya hoja generada respeta la grid 4 columnas × 3 filas.
+// angry_client (grid distinta) y hr_rep (sin hoja) usan el placeholder de color.
+// Hoja 1200×896 → frame 300×298 (se ignoran 2px sobrantes de alto).
+// Filas: 0 abajo, 1 lado(derecha), 2 arriba. Columnas: 0 idle, 1-2 walk, 3 death. idx = fila*4 + col.
+export const ENEMY_SHEET_IDS = [
+  'angry_email', 'toxic_manager', 'possessed_printer', 'auditor', 'angry_client', 'hr_rep',
+] as const;
+
+export const ENEMY_SHEET = {
+  IDLE: { down: 0, side: 4, up: 8 },
+  WALK: { down: [1, 2], side: [5, 6], up: [9, 10] },
+  DEATH: { down: 3, side: 7, up: 11 },
+  WALK_FPS: 6,
+} as const;
+
+// Dimensiones de frame por hoja (no todas se generaron al mismo tamaño).
+// 4 columnas × 3 filas en todas; angry_client se reempaquetó a celdas más chicas.
+export const ENEMY_FRAME: Record<string, { w: number; h: number }> = {
+  angry_email: { w: 300, h: 298 },
+  toxic_manager: { w: 300, h: 298 },
+  possessed_printer: { w: 300, h: 298 },
+  auditor: { w: 300, h: 298 },
+  hr_rep: { w: 300, h: 298 },
+  angry_client: { w: 129, h: 212 },
+};
+
+// Alto en pantalla por enemigo (px). Normales más chicos, élites más grandes.
+export const ENEMY_DISPLAY_H: Record<string, number> = {
+  angry_email: 34,
+  toxic_manager: 56,
+  possessed_printer: 58,
+  auditor: 58,
+  hr_rep: 50,
+  angry_client: 40,
+};
+
+export type EnemyDir = 'down' | 'side' | 'up';

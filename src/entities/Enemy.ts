@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
-import { ENTITY_SIZES, COLORS_GAME, ECONOMY, FEEL, CURSES } from '@/config/game.config';
+import { ENTITY_SIZES, COLORS_GAME, ECONOMY, FEEL, CURSES, PROGRESSION } from '@/config/game.config';
+import { ENEMY_SHEET, ENEMY_DISPLAY_H, ENEMY_FRAME } from '@/config/enemies.config';
+import type { EnemyDir } from '@/config/enemies.config';
 import type { EnemyDefinition, EnemyType } from '@/types';
 import type { RunContext } from '@/systems/RunContext';
 
@@ -31,6 +33,11 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
   private lastHpShown = -1;
   private active2 = false;
   private baseColor: number = COLORS_GAME.ENEMY; // restored after hit-flash
+
+  // Sprite visual animado (si el enemigo tiene hoja). El rect queda como cuerpo invisible.
+  private sprite: Phaser.GameObjects.Sprite | null = null;
+  private hasSheet = false;
+  private facing: EnemyDir = 'down';
 
   constructor(scene: Phaser.Scene) {
     super(scene, 0, 0, ENTITY_SIZES.ENEMY, ENTITY_SIZES.ENEMY, COLORS_GAME.ENEMY);
@@ -81,8 +88,32 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     // Reset visual state from possible previous death tween
     this.setScale(1).setAlpha(1);
 
+    // Sprite animado si hay hoja para este enemigo; si no, el rect de color queda visible.
+    const sheetKey = `enemysheet_${def.id}`;
+    this.hasSheet = this.scene.textures.exists(sheetKey);
+    if (this.hasSheet) {
+      const frameH = ENEMY_FRAME[def.id]?.h ?? 298;
+      const scale = (ENEMY_DISPLAY_H[def.id] ?? size * 1.5) / frameH;
+      if (this.sprite === null) {
+        this.sprite = this.scene.add.sprite(x, y, sheetKey, ENEMY_SHEET.IDLE.down)
+          .setOrigin(0.5, 1).setDepth(0);
+      }
+      this.facing = 'down';
+      this.sprite
+        .setTexture(sheetKey, ENEMY_SHEET.IDLE.down)
+        .setScale(scale)
+        .setFlipX(false)
+        .clearTint()
+        .setAlpha(1)
+        .setActive(true)
+        .setVisible(true);
+      this.setVisible(false);          // ocultar rect: el sprite es el visual
+    } else if (this.sprite) {
+      this.sprite.setActive(false).setVisible(false);
+    }
+
     this.active2 = true;
-    this.setActive(true).setVisible(true);
+    this.setActive(true).setVisible(!this.hasSheet);   // rect visible solo si no hay sprite
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.enable = true;
     body.reset(x, y);
@@ -122,10 +153,14 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
       this.detectionDelayMs -= delta;
     }
 
-    // HP bar sync
+    // Sprite animado sigue al cuerpo (pies en la base del rect)
+    this.updateSprite();
+
+    // HP bar sync — sobre la cabeza del sprite si lo hay, si no sobre el rect
     const ratio = Math.max(0, this.hp / this.maxHp);
     const bw = (this.def.isElite ? ENTITY_SIZES.ELITE : ENTITY_SIZES.ENEMY);
-    const by = this.y - bw / 2 - 6;
+    const displayH = ENEMY_DISPLAY_H[this.def.id] ?? bw * 1.5;
+    const by = this.hasSheet ? this.y + bw / 2 - displayH - 4 : this.y - bw / 2 - 6;
     this.hpBarBg.setPosition(this.x, by).setSize(bw, 3);
     this.hpBar.setPosition(this.x - (bw * (1 - ratio)) / 2, by).setSize(bw * ratio, 3);
 
@@ -172,6 +207,30 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     (this.body as Phaser.Physics.Arcade.Body).setVelocity(vx, vy);
   }
 
+  /** Posiciona el sprite a los pies del cuerpo y elige dirección/animación por velocidad. */
+  private updateSprite(): void {
+    if (!this.hasSheet || !this.sprite) return;
+    const bw = (this.def.isElite ? ENTITY_SIZES.ELITE : ENTITY_SIZES.ENEMY);
+    this.sprite.setPosition(this.x, this.y + bw / 2);
+
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    const vx = body.velocity.x, vy = body.velocity.y;
+    const moving = Math.abs(vx) > 1 || Math.abs(vy) > 1;
+    if (moving) {
+      if (Math.abs(vx) > Math.abs(vy)) {
+        this.facing = 'side';
+        this.sprite.setFlipX(vx < 0);
+      } else {
+        this.facing = vy > 0 ? 'down' : 'up';
+        this.sprite.setFlipX(false);
+      }
+      this.sprite.anims.play(`enemy_${this.def.id}_walk_${this.facing}`, true);
+    } else {
+      this.sprite.anims.stop();
+      this.sprite.setFrame(ENEMY_SHEET.IDLE[this.facing]);
+    }
+  }
+
   takeDamage(amount: number, sourceId = '', isCritical = false): void {
     if (!this.active2) return;
     if (this.invincible) return;
@@ -187,10 +246,17 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     this.ctx.bus.emit('enemy:hit', { enemy: this, amount, sourceId, isCritical });
 
     // Hit flash (presentation only — no gameplay effect)
-    this.setFillStyle(0xffffff);
-    this.scene.time.delayedCall(FEEL.ENEMY_FLASH_MS, () => {
-      if (this.active2) this.setFillStyle(this.baseColor);
-    });
+    if (this.hasSheet && this.sprite) {
+      this.sprite.setTintFill(0xffffff);
+      this.scene.time.delayedCall(FEEL.ENEMY_FLASH_MS, () => {
+        if (this.active2 && this.sprite) this.sprite.clearTint();
+      });
+    } else {
+      this.setFillStyle(0xffffff);
+      this.scene.time.delayedCall(FEEL.ENEMY_FLASH_MS, () => {
+        if (this.active2) this.setFillStyle(this.baseColor);
+      });
+    }
 
     if (this.hp <= 0) this.die();
   }
@@ -216,7 +282,8 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     this.active2 = false;
 
     // Gameplay resolution (XP, coins, kills, events) — immediate
-    const xp = this.def.xpValue * this.ctx.modifiers.xpMult;
+    // §7.6: xp = round(xpValue · XP_KILL_MULT · modifiers.xpMult)
+    const xp = Math.round(this.def.xpValue * PROGRESSION.XP_KILL_MULT * this.ctx.modifiers.xpMult);
     const coinRange = this.def.isElite
       ? { min: ECONOMY.ELITE_COINS_MIN, max: ECONOMY.ELITE_COINS_MAX }
       : { min: ECONOMY.ENEMY_COINS_MIN, max: ECONOMY.ENEMY_COINS_MAX };
@@ -244,24 +311,41 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     if (this.hpLabel) this.hpLabel.setVisible(false);
 
     // Death tween (presentation only)
-    this.scene.tweens.add({
-      targets: this,
-      scaleX: FEEL.ENEMY_DEATH_SCALE,
-      scaleY: FEEL.ENEMY_DEATH_SCALE,
-      alpha: 0,
-      duration: FEEL.ENEMY_DEATH_MS,
-      ease: 'Linear',
-      onComplete: () => {
-        this.setActive(false).setVisible(false);
-        this.setScale(1).setAlpha(1); // reset for next spawn
-      },
-    });
+    if (this.hasSheet && this.sprite) {
+      this.sprite.anims.stop();
+      this.sprite.setFrame(ENEMY_SHEET.DEATH[this.facing]);
+      const baseScale = this.sprite.scaleX;
+      this.scene.tweens.add({
+        targets: this.sprite,
+        alpha: 0,
+        duration: FEEL.ENEMY_DEATH_MS,
+        ease: 'Linear',
+        onComplete: () => {
+          if (this.sprite) this.sprite.setActive(false).setVisible(false).setScale(baseScale).setAlpha(1);
+        },
+      });
+      this.setActive(false);
+    } else {
+      this.scene.tweens.add({
+        targets: this,
+        scaleX: FEEL.ENEMY_DEATH_SCALE,
+        scaleY: FEEL.ENEMY_DEATH_SCALE,
+        alpha: 0,
+        duration: FEEL.ENEMY_DEATH_MS,
+        ease: 'Linear',
+        onComplete: () => {
+          this.setActive(false).setVisible(false);
+          this.setScale(1).setAlpha(1); // reset for next spawn
+        },
+      });
+    }
   }
 
   deactivate(): void {
     if (!this.active2) return;
     this.active2 = false;
     this.setActive(false).setVisible(false);
+    if (this.sprite) this.sprite.setActive(false).setVisible(false);
     (this.body as Phaser.Physics.Arcade.Body).enable = false;
     this.hpBarBg.setActive(false).setVisible(false);
     this.hpBar.setActive(false).setVisible(false);

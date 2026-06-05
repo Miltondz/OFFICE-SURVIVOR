@@ -67,7 +67,7 @@ export class WaveEventSystem {
   }
 
   private showBanner(ev: EventId): void {
-    const txt = this.scene.add.text(GAME.WIDTH / 2, 90, `⚠ ${EVENT_NAMES[ev]}`, {
+    const txt = this.scene.add.text(GAME.WIDTH / 2, 140, `⚠ ${EVENT_NAMES[ev]}`, {
       fontSize: '20px', color: '#ff5555', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(70);
     this.scene.tweens.add({

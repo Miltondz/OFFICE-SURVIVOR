@@ -78,3 +78,37 @@ export const CHARACTERS: CharacterDefinition[] = [
 export function getCharacterById(id: string): CharacterDefinition {
   return CHARACTERS.find(c => c.id === id) ?? BASE_CHARACTER;
 }
+
+// IDs con hoja de sprites en public/assets/characters/sheets/<id>.png (base = fallback a becario).
+export const CHARACTER_SHEET_IDS = ['base', 'becario', 'freelancer', 'director', 'rrhh', 'consultor'] as const;
+
+// Layout de la hoja: 5 columnas × 3 filas. Frame 275×256 (se ignora 1px sobrante a la derecha).
+// Filas: 0 abajo, 1 lado(derecha), 2 arriba. Columnas: 0 idle, 1-3 walk, 4 death. idx = fila*5 + col.
+export const CHAR_SHEET = {
+  FRAME_W: 275,
+  FRAME_H: 256,
+  IDLE: { down: 0, side: 5, up: 10 },
+  WALK: { down: [1, 2, 3], side: [6, 7, 8], up: [11, 12, 13] },
+  DEATH: { down: 4, side: 9, up: 14 },
+  WALK_FPS: 8,
+  DISPLAY_H: 50,     // alto en pantalla (px)
+  BODY_W: 88,        // cuerpo de colisión en coords de textura (con el scale queda chico)
+  BODY_H: 110,
+} as const;
+
+export type CharDir = 'down' | 'side' | 'up';
+
+// Dimensiones de frame por hoja (no todas se generaron al mismo tamaño). 5 col × 3 filas en todas.
+// Default = 275×256 (hoja 1376×768). becario se generó a 1536×1024 → 307×341.
+export const CHAR_FRAME: Record<string, { w: number; h: number }> = {
+  // becario v2: hoja 1280×768, 5×3 con frames cuadrados exactos.
+  becario: { w: 256, h: 256 },
+};
+
+export function charFrame(id: string): { w: number; h: number } {
+  return CHAR_FRAME[id] ?? { w: CHAR_SHEET.FRAME_W, h: CHAR_SHEET.FRAME_H };
+}
+
+// Override de frames de caminado por personaje (cuando la hoja no tiene 3 poses de walk).
+// Vacío: todas las hojas actuales tienen 3 poses → usan CHAR_SHEET.WALK [1,2,3] estándar.
+export const CHAR_WALK_OVERRIDE: Record<string, { down: number[]; side: number[]; up: number[]; fps?: number }> = {};

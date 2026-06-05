@@ -10,6 +10,9 @@ type CEOAttack = 'memo' | 'reunion' | 'revision' | 'restructuring' | 'idle';
 
 export class CEOBoss {
   body!: Phaser.GameObjects.Rectangle;
+  private sprite: Phaser.GameObjects.Sprite | null = null;
+  private hasSprite = false;
+  private attackFrameTimer = 0;     // ms restantes mostrando frame de ataque
   private hpBarBg!: Phaser.GameObjects.Rectangle;
   private hpBar!: Phaser.GameObjects.Rectangle;
   private hpText!: Phaser.GameObjects.Text;
@@ -52,6 +55,15 @@ export class CEOBoss {
     const physBody = this.body.body as Phaser.Physics.Arcade.Body;
     physBody.setCollideWorldBounds(true);
 
+    // Sprite visual del CEO (el rect queda como cuerpo invisible). Fallback al rect si no hay hoja.
+    this.hasSprite = scene.textures.exists('boss_ceo');
+    if (this.hasSprite) {
+      this.sprite = scene.add.sprite(cx, cy, 'boss_ceo', BOSS.IDLE_P1[0])
+        .setScale(BOSS.DISPLAY_H / BOSS.SHEET_FRAME_H).setDepth(3);
+      this.sprite.play('ceo_idle_p1');
+      this.body.setVisible(false);
+    }
+
     // HP bar
     this.hpBarBg = scene.add.rectangle(cx, cy - BOSS.SIZE / 2 - 10, 200, 8, 0x440000);
     this.hpBar = scene.add.rectangle(cx, cy - BOSS.SIZE / 2 - 10, 200, 8, 0xff2222);
@@ -88,6 +100,8 @@ export class CEOBoss {
 
     const px = this.scene.data.get('playerX') as number ?? 480;
     const py = this.scene.data.get('playerY') as number ?? 270;
+
+    this.updateSprite(delta, px);
 
     // Charge windup
     if (this.charging) {
@@ -127,6 +141,7 @@ export class CEOBoss {
     if (this.revisionTimer >= revisionInterval) {
       this.revisionTimer = 0;
       this.charging = true;
+      this.flashAttack();
       this.chargeWindup = BOSS.CHARGE_WINDUP_MS;
       this.chargeTarget = { x: px, y: py };
       (this.body.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
@@ -150,29 +165,63 @@ export class CEOBoss {
       );
     }
 
-    // Sync HP bar
+    // Sync HP bar — sobre la cabeza del sprite si lo hay
     const ratio = Math.max(0, this.hp / (this.ctx.player.items.includes('ceo_memo') ? BOSS.HP * 1.5 : BOSS.HP));
-    this.hpBar.setPosition(this.body.x - (200 * (1 - ratio)) / 2, this.body.y - BOSS.SIZE / 2 - 10);
+    const topY = this.body.y - (this.hasSprite ? BOSS.DISPLAY_H / 2 : BOSS.SIZE / 2) - 10;
+    this.hpBar.setPosition(this.body.x - (200 * (1 - ratio)) / 2, topY);
     this.hpBar.width = 200 * ratio;
-    this.hpBarBg.setPosition(this.body.x, this.body.y - BOSS.SIZE / 2 - 10);
-    this.hpText.setPosition(this.body.x, this.body.y - BOSS.SIZE / 2 - 22);
+    this.hpBarBg.setPosition(this.body.x, topY);
+    this.hpText.setPosition(this.body.x, topY - 12);
 
     void time;
     void this.currentAttack;
     void this.attackTimer;
   }
 
+  /** Sigue el cuerpo, mira al jugador y elige idle por fase o frame de ataque. */
+  private updateSprite(delta: number, px: number): void {
+    if (!this.hasSprite || !this.sprite) return;
+    this.sprite.setPosition(this.body.x, this.body.y);
+    this.sprite.setFlipX(px < this.body.x);
+
+    if (this.attackFrameTimer > 0) {
+      this.attackFrameTimer -= delta;
+      this.sprite.anims.stop();
+      this.sprite.setFrame(this.phase === 'phase2' ? BOSS.ATTACK_P2 : BOSS.ATTACK_P1);
+      return;
+    }
+    const key = this.phase === 'phase2' ? 'ceo_idle_p2' : 'ceo_idle_p1';
+    if (this.sprite.anims.getName() !== key || !this.sprite.anims.isPlaying) {
+      this.sprite.play(key, true);
+    }
+  }
+
+  /** Muestra brevemente el frame de ataque de la fase actual. */
+  private flashAttack(): void {
+    this.attackFrameTimer = 400;
+  }
+
   takeDamage(amount: number): void {
     if (!this.alive) return;
     this.hp -= amount;
+
+    // Hit flash (sprite si lo hay)
+    if (this.hasSprite && this.sprite) {
+      this.sprite.setTintFill(0xffffff);
+      this.scene.time.delayedCall(60, () => { if (this.alive && this.sprite) this.sprite.clearTint(); });
+    }
 
     // Phase transition
     if (this.phase === 'phase1' && this.hp <= BOSS.PHASE2_HP_THRESHOLD) {
       this.phase = 'phase2';
       this.ctx.bus.emit('boss:phase2');
-      // Flash
-      this.body.setFillStyle(0xffffff);
-      this.scene.time.delayedCall(200, () => this.body.setFillStyle(COLORS_GAME.BOSS));
+      // Flash + cambio a animación de fase 2
+      if (this.hasSprite && this.sprite) {
+        this.sprite.play('ceo_idle_p2', true);
+      } else {
+        this.body.setFillStyle(0xffffff);
+        this.scene.time.delayedCall(200, () => this.body.setFillStyle(COLORS_GAME.BOSS));
+      }
     }
 
     if (this.hp <= 0) {
@@ -182,6 +231,7 @@ export class CEOBoss {
   }
 
   private fireMemo(px: number, py: number): void {
+    this.flashAttack();
     const angle = Phaser.Math.Angle.Between(this.body.x, this.body.y, px, py);
     const proj = this.enemySys.enemyProjectilePool.get(this.body.x, this.body.y) as Projectile | null;
     if (!proj) return;
@@ -194,6 +244,7 @@ export class CEOBoss {
   }
 
   private fireRestructuring(): void {
+    this.flashAttack();
     // BOSS.RESTRUCTURING_LINES (3) lines of projectiles sweeping screen
     for (let line = 0; line < BOSS.RESTRUCTURING_LINES; line++) {
       const y = 100 + line * 170;
@@ -226,6 +277,10 @@ export class CEOBoss {
     this.scene.physics.world.timeScale = 100; // very slow (not 0 — tweens need time)
     this.scene.time.timeScale = 0.001;         // near-freeze for game timers
     this.body.setFillStyle(0xffffff);
+    if (this.hasSprite && this.sprite) {
+      this.sprite.anims.stop();
+      this.sprite.setTintFill(0xffffff);
+    }
 
     // Use real-time via a direct setTimeout so timeScale doesn't affect it
     const resumeAndFinish = (): void => {
@@ -235,18 +290,23 @@ export class CEOBoss {
       // Emit boss:defeated — GameScene subscribes for shake + victory transition
       this.ctx.bus.emit('boss:defeated');
 
-      // Grow-fade tween
+      // Grow-fade tween (cuerpo + sprite). El sprite crece desde su escala base.
       this.scene.tweens.add({
-        targets: this.body,
-        scaleX: 2,
-        scaleY: 2,
-        alpha: 0,
-        duration: FEEL.BOSS_DEATH_TWEEN_MS,
-        ease: 'Cubic.Out',
-        onComplete: () => {
-          this.body.setVisible(false);
-        },
+        targets: this.body, scaleX: 2, scaleY: 2, alpha: 0,
+        duration: FEEL.BOSS_DEATH_TWEEN_MS, ease: 'Cubic.Out',
+        onComplete: () => this.body.setVisible(false),
       });
+      if (this.hasSprite && this.sprite) {
+        const base = this.sprite.scaleX;
+        // Montón de oro en el suelo donde cae el CEO
+        this.scene.add.image(this.body.x, this.body.y + BOSS.DISPLAY_H / 4, 'boss_ceo')
+          .setFrame(BOSS.GOLD_FRAME).setScale(base).setDepth(2);
+        this.scene.tweens.add({
+          targets: this.sprite, scaleX: base * 1.8, scaleY: base * 1.8, alpha: 0,
+          duration: FEEL.BOSS_DEATH_TWEEN_MS, ease: 'Cubic.Out',
+          onComplete: () => { if (this.sprite) this.sprite.setVisible(false); },
+        });
+      }
     };
 
     setTimeout(resumeAndFinish, FEEL.BOSS_DEATH_FREEZE_MS);

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GAME, MAP } from '@/config/game.config';
+import { EFFECTS } from '@/config/effects.config';
 import type { RunContext } from './RunContext';
 import { recomputeModifiers } from './RunContext';
 import type { Player } from '@/entities/Player';
@@ -61,22 +62,32 @@ export class MapSystem {
         tries++;
       } while (Phaser.Math.Distance.Between(x, y, cx, cy) < MAP.CENTER_EXCLUSION && tries < 10);
 
+      const key = spec === MAP.DESK ? 'desk' : spec === MAP.CABINET ? 'cabinet' : 'plant';
       const rect = this.scene.add.rectangle(x, y, spec.w, spec.h, spec.color).setDepth(1);
+      this.addProp(key, x, y, rect);
       (spec === MAP.PLANT ? plants : solid).add(rect);
     }
 
     // Functional objects
-    this.scene.add.rectangle(cx, 70, MAP.FUNC_SIZE, MAP.FUNC_SIZE, MAP.COFFEE_COLOR).setDepth(1);
-    this.scene.add.text(cx, 70, '☕', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
+    const coffee = this.scene.add.rectangle(cx, 70, MAP.FUNC_SIZE, MAP.FUNC_SIZE, MAP.COFFEE_COLOR).setDepth(1);
+    if (!this.addProp('coffee', cx, 70, coffee)) {
+      this.scene.add.text(cx, 70, '☕', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
+    }
+    this.addSteam(cx, 70 - 22);   // vaho en bucle sobre la cafetera
 
     this.vending = this.scene.add.rectangle(cx, GAME.HEIGHT - 70, MAP.FUNC_SIZE, MAP.FUNC_SIZE, MAP.VENDING_COLOR).setDepth(1);
-    this.scene.add.text(cx, GAME.HEIGHT - 70, '🥤', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
+    if (!this.addProp('vending', cx, GAME.HEIGHT - 70, this.vending)) {
+      this.scene.add.text(cx, GAME.HEIGHT - 70, '🥤', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
+    }
     solid.add(this.vending); // staticGroup.add creates the static body
 
     // Wall extinguishers in the corners (destructible).
     const corners = [[60, 60], [GAME.WIDTH - 60, 60], [60, GAME.HEIGHT - 60], [GAME.WIDTH - 60, GAME.HEIGHT - 60]];
     for (const [ex, ey] of corners) {
-      const e = this.scene.add.rectangle(ex, ey, 24, 24, MAP.EXTINTOR_COLOR).setDepth(1);
+      const e = this.scene.add.rectangle(ex, ey, 24, 24, MAP.EXTINTOR_COLOR)
+        .setStrokeStyle(2, MAP.EXTINTOR_BORDER).setDepth(1);
+      const img = this.addProp('extintor', ex, ey, e);
+      if (img) e.setData('img', img);   // para destruir el sprite al romper el extintor
       extintores.add(e);
     }
 
@@ -91,10 +102,36 @@ export class MapSystem {
     this.scene.physics.add.overlap(this.weaponSys.projectilePool, extintores, (_proj, extGO) => {
       const ext = extGO as Phaser.GameObjects.Rectangle;
       if (!ext.active) return;
+      const img = ext.getData('img') as Phaser.GameObjects.Image | undefined;
+      if (img) img.destroy();
       ext.destroy(); // removes from static group + physics
       this.ctx.player.stress = Math.max(0, this.ctx.player.stress - MAP.EXTINTOR_STRESS);
       this.ctx.bus.emit('stress:changed', { value: this.ctx.player.stress });
     });
+  }
+
+  /**
+   * Reemplaza el visual de un collider por el sprite del prop (oculta el rect, devuelve la imagen).
+   * Escala al alto MAP.SPRITE_H[key] conservando aspecto. Devuelve null si no hay textura.
+   */
+  private addProp(key: keyof typeof MAP.SPRITE_H, x: number, y: number,
+    rect: Phaser.GameObjects.Rectangle): Phaser.GameObjects.Image | null {
+    const tex = `map_${key}`;
+    if (!this.scene.textures.exists(tex)) return null;
+    rect.setVisible(false);
+    const src = this.scene.textures.get(tex).getSourceImage();
+    const scale = MAP.SPRITE_H[key] / src.height;
+    return this.scene.add.image(x, y, tex).setScale(scale).setDepth(0);
+  }
+
+  /** Vaho de café animado en bucle (origen abajo-centro para que suba desde la cafetera). */
+  private addSteam(x: number, y: number): void {
+    const key = 'fx_steam';
+    if (!this.scene.textures.exists(key) || !this.scene.anims.exists(key)) return;
+    const fx = EFFECTS.steam;
+    const scale = fx.display / Math.max(fx.frameW, fx.frameH);
+    const s = this.scene.add.sprite(x, y, key, 0).setOrigin(0.5, 1).setScale(scale).setDepth(1).setAlpha(0.8);
+    s.play(key);
   }
 
   update(delta: number): void {

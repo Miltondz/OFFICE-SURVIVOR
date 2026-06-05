@@ -43,7 +43,9 @@ export class BuildReportScene extends Phaser.Scene {
     const cx = GAME.WIDTH / 2;
     const s = this.stats;
 
-    this.add.rectangle(cx, GAME.HEIGHT / 2, GAME.WIDTH, GAME.HEIGHT, this.victory ? 0x221100 : 0x110000);
+    this.add.image(cx, GAME.HEIGHT / 2, this.victory ? 'bg_victory' : 'bg_gameover')
+      .setDisplaySize(GAME.WIDTH, GAME.HEIGHT);
+    this.add.rectangle(cx, GAME.HEIGHT / 2, GAME.WIDTH, GAME.HEIGHT, 0x000000, 0.55);
 
     // Header
     this.add.text(40, 24, this.victory ? '¡VICTORIA!' : 'GAME OVER', {

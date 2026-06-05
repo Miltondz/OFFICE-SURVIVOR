@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SCENES, GAME, COLORS, SPAWN, BOSS, FEEL, CURSES } from '@/config/game.config';
+import { SCENES, GAME, SPAWN, BOSS, FEEL, CURSES } from '@/config/game.config';
 import { SceneManager } from '@/systems/SceneManager';
 import { EventBus } from '@/systems/EventBus';
 import { createRunContext, recomputeModifiers, applyCharacter } from '@/systems/RunContext';
@@ -19,13 +19,16 @@ import { UpgradePool } from '@/systems/UpgradePool';
 import { CEOBoss } from '@/entities/CEOBoss';
 import { DamageZone } from '@/entities/DamageZone';
 import { Projectile } from '@/entities/Projectile';
-import { installItemReactions, setItemReactionDeps } from '@/systems/ItemReactions';
+import { installItemReactions, setItemReactionDeps, applyItemPickup } from '@/systems/ItemReactions';
 import { ScreenShake } from '@/systems/ScreenShake';
 import { DamageNumbers } from '@/systems/DamageNumbers';
 import { ParticleBursts } from '@/systems/ParticleBursts';
+import { EffectAnims } from '@/systems/EffectAnims';
 import { AudioManager } from '@/systems/AudioManager';
 import { SaveManager } from '@/systems/SaveManager';
 import { META_UPGRADES, META_STRESS_RESIST_PER_LEVEL } from '@/config/meta.config';
+import { ITEMS } from '@/config/items.config';
+import { RARITY_RULES, RARITY_WEIGHTS } from '@/config/game.config';
 
 export class GameScene extends Phaser.Scene {
   private ctx!: RunContext;
@@ -49,6 +52,7 @@ export class GameScene extends Phaser.Scene {
   private screenShake!: ScreenShake;
   private damageNumbers!: DamageNumbers;
   private particles!: ParticleBursts;
+  private effects!: EffectAnims;
   private audio = AudioManager.getInstance();
 
   // Burnout vignette (fixed to camera)
@@ -59,11 +63,18 @@ export class GameScene extends Phaser.Scene {
   private victory = false;
   private ipoActive = false;
 
+  // Intermission flow (wave cleared → level-ups → shop → countdown)
+
   // Throttle shoot beep
   private lastShootBeep = 0;
-  private readonly SHOOT_BEEP_MIN_MS = 125; // ~8/s max
+  private readonly SHOOT_BEEP_MIN_MS = 125;
+
+  private escKey!: Phaser.Input.Keyboard.Key;
 
   private selectedCharacterId = 'base';
+
+  // Regen accumulator
+  private regenAccum = 0;
 
   constructor() {
     super({ key: SCENES.GAME });
@@ -81,14 +92,13 @@ export class GameScene extends Phaser.Scene {
     this.ipoActive = false;
     this.boss = null;
     this.vignetteTween = null;
+    this.regenAccum = 0;
 
     this.ctx = createRunContext();
 
-    // Apply selected character base stats first (overrides createRunContext defaults).
     this.ctx.character = getCharacterById(this.selectedCharacterId);
     applyCharacter(this.ctx);
 
-    // Apply meta upgrades on top (consultor ignores meta-progression).
     const saveForMeta = SaveManager.load();
     if (!this.ctx.character.ignoreMeta) {
       applyMetaUpgrades(this.ctx, saveForMeta);
@@ -97,25 +107,14 @@ export class GameScene extends Phaser.Scene {
     // Background
     const cx = GAME.WIDTH / 2;
     const cy = GAME.HEIGHT / 2;
-    this.add.rectangle(cx, cy, GAME.WIDTH, GAME.HEIGHT, COLORS.BG);
+    this.add.image(cx, cy, 'bg_floor').setDisplaySize(GAME.WIDTH, GAME.HEIGHT).setDepth(-10);
 
-    // Grid lines
-    const gridColor = 0x222222;
-    for (let x = 0; x <= GAME.WIDTH; x += 80) {
-      this.add.line(0, 0, x, 0, x, GAME.HEIGHT, gridColor, 0.3).setOrigin(0, 0);
-    }
-    for (let y = 0; y <= GAME.HEIGHT; y += 80) {
-      this.add.line(0, 0, 0, y, GAME.WIDTH, y, gridColor, 0.3).setOrigin(0, 0);
-    }
-
-    // Damage zone pool
+    // Pools
     this.zonePool = this.add.group({
       classType: DamageZone,
       maxSize: 20,
       runChildUpdate: true,
     });
-
-    // Enemy projectile pool
     this.enemyProjPool = this.physics.add.group({
       classType: Projectile,
       maxSize: 100,
@@ -136,9 +135,13 @@ export class GameScene extends Phaser.Scene {
     this.spawnDir = new SpawnDirector(this.ctx, this.enemySys);
     this.levelSys = new LevelSystem(this, this.ctx);
     this.runTracker = new RunTracker(this.ctx);
-    void this.runTracker; // subscribes to bus in constructor; no per-frame update needed
+    void this.runTracker;
 
     this.pickupSys = new PickupSystem(this, this.ctx, this.player);
+    this.pickupSys.setDropCallbacks(
+      () => this.grantFreeItem(),
+      () => this.grantDropUpgrade(),
+    );
     this.pickupSys.init();
 
     this.upgradePool = new UpgradePool();
@@ -150,10 +153,8 @@ export class GameScene extends Phaser.Scene {
     this.mapSys = new MapSystem(this, this.ctx, this.player, this.enemySys, this.weaponSys, this.pickupSys, this.upgradePool);
     this.mapSys.init();
 
-    // Run starts by choosing a starting weapon (no forced default).
+    // Starting weapon pick
     this.levelSys.grantUpgrade(true);
-    // Meta upgrade: starting_weapon — grants a second weapons-only starting choice.
-    // (Every run already opens one weapon choice above; this adds a second pick.)
     if ((saveForMeta.metaUpgrades['starting_weapon'] ?? 0) >= 1) {
       this.levelSys.grantUpgrade(true);
     }
@@ -162,18 +163,19 @@ export class GameScene extends Phaser.Scene {
     this.screenShake = new ScreenShake(this.cameras.main);
     this.damageNumbers = new DamageNumbers(this);
     this.particles = new ParticleBursts(this);
+    this.effects = new EffectAnims(this);
 
-    // Burnout vignette (fixed to camera, high depth)
+    // Burnout vignette
     this.vignetteRect = this.add.rectangle(
       GAME.WIDTH / 2, GAME.HEIGHT / 2,
       GAME.WIDTH, GAME.HEIGHT,
       0xff0000, 0,
     ).setScrollFactor(0).setDepth(50).setAlpha(0);
 
-    // Launch HUD overlay
-    this.scene.launch(SCENES.HUD, { ctx: this.ctx });
+    // Launch HUD overlay — pass levelSys reference for XP display
+    this.scene.launch(SCENES.HUD, { ctx: this.ctx, levelSys: this.levelSys });
 
-    // EventBus subscriptions
+    // ---- EventBus subscriptions ----
     this.ctx.bus.on('player:died', () => this.handlePlayerDied());
     this.ctx.bus.on('boss:spawned', () => this.spawnBoss());
     this.ctx.bus.on('boss:defeated', () => this.handleBossDefeated());
@@ -182,12 +184,10 @@ export class GameScene extends Phaser.Scene {
       void p; // wave display handled by HUDScene
     });
 
-    // Reward: an upgrade choice after every wave cleared.
-    this.ctx.bus.on('wave:complete', () => {
-      this.levelSys.grantUpgrade();
-    });
+    // §7.5 — wave:cleared triggers intermission flow (replaces wave:complete grantUpgrade)
+    this.ctx.bus.on('wave:cleared', () => this.beginIntermission());
 
-    // Curse picked mid-run → refresh weapon mods (exclusivity) + start timer-based effects.
+    // Curse picked mid-run
     this.ctx.bus.on('curse:applied', (p: { id: string }) => {
       this.weaponSys.recomputeWeaponMods();
       this.startCurseTimers(p.id);
@@ -205,21 +205,21 @@ export class GameScene extends Phaser.Scene {
       this.weaponSys.recomputeWeaponMods();
     });
 
-    // --- Phase 3 event hooks ---
-
-    // Screen shake
-    this.ctx.bus.on('player:hit', () => {
-      this.screenShake.play('PLAYER_HIT');
+    // §7.5 — SpawnDirector countdown callback → HUDScene
+    this.spawnDir.setCountdownCallback((seconds: number) => {
+      this.ctx.bus.emit('wave:countdown', { seconds });
     });
+
+    // Phase 3 event hooks
+    this.ctx.bus.on('player:hit', () => this.screenShake.play('PLAYER_HIT'));
     this.ctx.bus.on('enemy:killed', (p: { type: string; isElite: boolean; x: number; y: number }) => {
       if (p.isElite) this.screenShake.play('ELITE_KILLED');
       this.particles.onEnemyKilled(p.x, p.y, p.isElite);
+      const fx = p.type === 'toxic_manager' ? 'toxic' : p.isElite ? 'elite' : 'death';
+      this.effects.play(fx, p.x, p.y, p.isElite ? 1.3 : 1);
     });
-    this.ctx.bus.on('boss:defeated', () => {
-      this.screenShake.play('BOSS_DEAD');
-    });
+    this.ctx.bus.on('boss:defeated', () => this.screenShake.play('BOSS_DEAD'));
 
-    // Damage numbers — enemy hits
     this.ctx.bus.on('enemy:hit', (p: { enemy: { x: number; y: number }; amount: number; isCritical: boolean }) => {
       this.damageNumbers.show({
         value: p.amount,
@@ -229,7 +229,6 @@ export class GameScene extends Phaser.Scene {
       });
     });
 
-    // Damage numbers — player hit
     this.ctx.bus.on('player:hit', (p: { amount: number }) => {
       this.damageNumbers.show({
         value: p.amount,
@@ -239,15 +238,14 @@ export class GameScene extends Phaser.Scene {
       });
     });
 
-    // Burnout vignette toggle
     this.ctx.bus.on('player:burnout', () => this.updateVignette(true));
     this.ctx.bus.on('stress:changed', (p: { value: number }) => {
       this.updateVignette(p.value >= 90);
     });
 
-    // Level-up popup
     this.ctx.bus.on('player:level_up', (p: { level: number }) => {
       this.showLevelUpPopup(p.level);
+      this.effects.play('levelup', this.player.x, this.player.y - 28);
     });
 
     // Audio hooks
@@ -260,24 +258,27 @@ export class GameScene extends Phaser.Scene {
       this.audio.playBeep('pickup', 'sfx');
       const isCafe = p.kind === 'cafe';
       this.particles.onPickupCollected(this.player.x, this.player.y, isCafe);
+      if (p.kind === 'moneda') this.effects.play('coin', this.player.x, this.player.y);
     });
     this.ctx.bus.on('player:burnout', () => this.audio.playBeep('burnout_start', 'sfx'));
     this.ctx.bus.on('boss:spawned', () => this.audio.playBeep('boss_appear', 'sfx'));
     this.ctx.bus.on('boss:defeated', () => this.audio.playBeep('boss_die', 'sfx'));
 
-    // Boss screen shake on hit
     this.ctx.bus.on('enemy:hit', (p: { enemy: unknown }) => {
-      // boss body is a Rectangle, not an Enemy — check via ctx boss
       if (this.boss && p.enemy === this.boss.body) {
         this.screenShake.play('BOSS_HIT');
       }
     });
 
-    // Start first wave
+    // §7.5 — shop:closed → notify SpawnDirector to start countdown
+    this.ctx.bus.on('shop:closed', () => {
+      this.spawnDir.notifyIntermissionDone();
+    });
+
     this.spawnDir.triggerFirstWave();
     installItemReactions(this.ctx);
 
-    // Consultor Externo — "Por Hora": +5% all stats every 60s (no cap).
+    // Consultor Externo — "Por Hora"
     if (this.ctx.character.timeScaling) {
       this.time.addEvent({
         delay: CHAR.CONSULTOR_TIME_INTERVAL_S * 1000,
@@ -290,12 +291,19 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    // Resume audio context on first interaction
     this.input.once('pointerdown', () => this.audio.resume());
+
+    this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
   }
 
   update(_time: number, delta: number): void {
     if (this.gameOver || this.victory) return;
+
+    if (Phaser.Input.Keyboard.JustDown(this.escKey)) {
+      this.scene.launch(SCENES.PAUSE);
+      this.scene.pause();
+      return;
+    }
 
     this.ctx.elapsedS += delta / 1000;
     this.ctx.stats.timeSurvived = Math.floor(this.ctx.elapsedS);
@@ -316,6 +324,16 @@ export class GameScene extends Phaser.Scene {
     this.waveEvents.update(delta);
     this.mapSys.update(delta);
 
+    // §7.2 — passive HP regen from stat upgrades
+    if (this.ctx.modifiers.regenHpPerS > 0) {
+      this.regenAccum += this.ctx.modifiers.regenHpPerS * delta / 1000;
+      if (this.regenAccum >= 1) {
+        const heal = Math.floor(this.regenAccum);
+        this.regenAccum -= heal;
+        this.ctx.player.hp = Math.min(this.ctx.player.maxHp, this.ctx.player.hp + heal);
+      }
+    }
+
     if (this.boss?.alive) {
       this.boss.update(_time, delta);
       const bossBody = this.boss.body;
@@ -324,18 +342,15 @@ export class GameScene extends Phaser.Scene {
         this.player.takeDamage(BOSS.CONTACT_DAMAGE);
       }
 
-      // Emit boss HP ratio for HUDScene boss bar
       const maxHp = this.ctx.player.items.includes('ceo_memo') ? BOSS.HP * BOSS.CEO_MEMO_BOSS_HP_MULT : BOSS.HP;
       const ratio = Math.max(0, this.boss.hp / maxHp);
       this.ctx.bus.emit('boss:hp', { ratio });
     }
 
-    // YOLO: floor stress at 90
     if (this.ctx.player.items.includes('yolo') && this.ctx.player.stress < 90) {
       this.ctx.player.stress = 90;
     }
 
-    // Throttled shoot beep (WeaponSystem fires every frame for laser)
     if (this.weaponSys.weapons.length > 0) {
       const now = _time;
       if (now - this.lastShootBeep > this.SHOOT_BEEP_MIN_MS) {
@@ -344,6 +359,83 @@ export class GameScene extends Phaser.Scene {
       }
     }
   }
+
+  // ─── §7.5 Intermission flow ───────────────────────────────────────────────
+
+  /**
+   * Called when 'wave:cleared' fires.
+   * Sequence: resolve pending level-ups (player-upgrade overlay) → open ShopOverlay → 4s countdown → next wave.
+   */
+  private beginIntermission(): void {
+    this.resolveIntermissionLevels();
+  }
+
+  /**
+   * Level-ups that happened during the wave are resolved first.
+   * LevelSystem.update() drives them. We wait until none are pending, then open shop.
+   * Since levelSys queues are consumed in update(), we just start checking.
+   */
+  private resolveIntermissionLevels(): void {
+    // Check if any upgrade overlay is currently open; if so, wait for it to close
+    // then open shop. We use a recurring check with delayedCall.
+    this.checkLevelsResolved();
+  }
+
+  private checkLevelsResolved(): void {
+    // If UpgradeOverlay is still active, wait
+    const scenes = this.scene.manager.getScenes(true);
+    const upgradeOpen = scenes.some(s => s.scene.key === SCENES.UPGRADE_OVERLAY);
+    if (upgradeOpen) {
+      this.time.delayedCall(100, () => this.checkLevelsResolved());
+      return;
+    }
+    // All level-ups resolved — open shop
+    this.openShop();
+  }
+
+  private openShop(): void {
+    this.scene.launch(SCENES.SHOP, {
+      ctx: this.ctx,
+      onDone: () => {
+        // shop:closed event will call spawnDir.notifyIntermissionDone()
+      },
+    });
+    this.scene.pause();
+  }
+
+  // ─── §7.4 Map drop callbacks ──────────────────────────────────────────────
+
+  /** Grant a random eligible passive item (free, like shop). */
+  private grantFreeItem(): void {
+    const level = this.ctx.player.level;
+    const pool = ITEMS.filter(item => {
+      if (item.category === 'consumable') return false;
+      if (this.ctx.player.items.includes(item.id)) return !item.maxStack || item.maxStack > 1;
+      if (item.rarity === 'epic' && level < RARITY_RULES.EPIC_MIN_LEVEL) return false;
+      if (item.rarity === 'legendary' && level < RARITY_RULES.LEGENDARY_MIN_LEVEL) return false;
+      return true;
+    });
+    if (pool.length === 0) return;
+
+    // Weighted pick
+    const totalW = pool.reduce((s, i) => s + RARITY_WEIGHTS[i.rarity], 0);
+    let rand = Math.random() * totalW;
+    let picked = pool[pool.length - 1];
+    for (const item of pool) {
+      rand -= RARITY_WEIGHTS[item.rarity];
+      if (rand <= 0) { picked = item; break; }
+    }
+    applyItemPickup(this.ctx, picked);
+    recomputeModifiers(this.ctx);
+    this.weaponSys.recomputeWeaponMods();
+  }
+
+  /** Open a player-upgrade choice from a map drop. */
+  private grantDropUpgrade(): void {
+    this.levelSys.grantUpgrade(false, true);
+  }
+
+  // ─── Utilities ────────────────────────────────────────────────────────────
 
   private updateVignette(visible: boolean): void {
     if (visible) {
@@ -377,21 +469,16 @@ export class GameScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(60).setScrollFactor(0).setAlpha(1).setScale(0.5);
 
-    // Bounce: 0.5 → 1.2 → 1.0 in 300ms
     this.tweens.add({
       targets: popup,
-      scaleX: 1.2,
-      scaleY: 1.2,
-      duration: 200,
-      ease: 'Bounce.Out',
+      scaleX: 1.2, scaleY: 1.2,
+      duration: 200, ease: 'Bounce.Out',
       onComplete: () => {
         this.tweens.add({
           targets: popup,
-          scaleX: 1.0,
-          scaleY: 1.0,
+          scaleX: 1.0, scaleY: 1.0,
           duration: 100,
           onComplete: () => {
-            // Hold LEVELUP_POPUP_MS then fade out
             this.time.delayedCall(FEEL.LEVELUP_POPUP_MS, () => {
               this.tweens.add({
                 targets: popup,
@@ -458,8 +545,6 @@ export class GameScene extends Phaser.Scene {
         },
       });
     } else if (id === 'mandatory_overtime') {
-      // SIMPLIFIED: the "+50% stats at 10 min" power is applied; the 15-min run / delayed CEO is not
-      // (the boss is wave-driven). Documented in the Mejora 4 notes.
       this.time.delayedCall(CURSES.MANDATORY_OVERTIME_BUFF_S * 1000, () => {
         const k = CURSES.MANDATORY_OVERTIME_MULT;
         this.ctx.player.damageMultiplier *= k;
@@ -485,7 +570,6 @@ export class GameScene extends Phaser.Scene {
 
 /**
  * Apply all purchased meta upgrades to ctx.player and ctx.metaStressMult.
- * Called once in GameScene.create(), after createRunContext(), before systems init.
  */
 function applyMetaUpgrades(ctx: RunContext, save: ReturnType<typeof SaveManager.load>): void {
   for (const upgrade of META_UPGRADES) {
@@ -493,10 +577,8 @@ function applyMetaUpgrades(ctx: RunContext, save: ReturnType<typeof SaveManager.
     if (level <= 0) continue;
 
     if (upgrade.id === 'stress_resist') {
-      // -20% stress accrual per level; applied as a multiplier read by StressSystem
       ctx.metaStressMult = Math.pow(1 - META_STRESS_RESIST_PER_LEVEL, level);
     } else {
-      // All other upgrades mutate player state via applyToPlayer
       ctx.player = upgrade.applyToPlayer(ctx.player, level);
     }
   }

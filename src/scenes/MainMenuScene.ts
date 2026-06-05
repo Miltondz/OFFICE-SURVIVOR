@@ -3,12 +3,12 @@ import { SCENES, GAME, COLORS } from '@/config/game.config';
 import { SceneManager } from '@/systems/SceneManager';
 import { AudioManager } from '@/systems/AudioManager';
 import { SaveManager } from '@/systems/SaveManager';
-import { CHARACTERS } from '@/config/characters.config';
+import { CHARACTERS, CHAR_SHEET } from '@/config/characters.config';
 import { formatTime } from '@/utils';
 
-const BUTTON_W = 240;
-const BUTTON_H = 52;
-const BUTTON_GAP = 14;
+const BUTTON_W = 170;
+const BUTTON_H = 38;
+const BUTTON_GAP = 10;
 
 export class MainMenuScene extends Phaser.Scene {
   private audio = AudioManager.getInstance();
@@ -21,20 +21,22 @@ export class MainMenuScene extends Phaser.Scene {
     const cx = GAME.WIDTH / 2;
     const cy = GAME.HEIGHT / 2;
 
-    // Background
-    this.add.rectangle(cx, cy, GAME.WIDTH, GAME.HEIGHT, COLORS.BG);
+    // Background image (+ dark scrim for button legibility)
+    this.add.image(cx, cy, 'bg_menu').setDisplaySize(GAME.WIDTH, GAME.HEIGHT);
+    this.add.rectangle(cx, cy, GAME.WIDTH, GAME.HEIGHT, 0x000000, 0.4);
 
-    // Title
-    this.add.text(cx, cy - 175, 'OFFICE SURVIVOR', {
-      fontSize: '52px',
-      color: COLORS.TEXT,
-      fontStyle: 'bold',
-    }).setOrigin(0.5);
+    // Panel opaco detrás del título para que resalte
+    this.add.rectangle(cx, cy - 158, 590, 124, 0x0a0a14, 0.62).setStrokeStyle(2, 0x000000);
+
+    // Logo (recortado 1319x251)
+    this.add.image(cx, cy - 160, 'ui_logo').setOrigin(0.5).setDisplaySize(560, 560 * 251 / 1319);
 
     // Subtitle
     this.add.text(cx, cy - 115, 'Sobrevive la jornada laboral', {
       fontSize: '18px',
-      color: COLORS.TEXT_MUTED,
+      color: COLORS.TEXT,
+      stroke: '#000000',
+      strokeThickness: 3,
     }).setOrigin(0.5);
 
     const save = SaveManager.load();
@@ -49,25 +51,28 @@ export class MainMenuScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
-    const startY = cy - 32;
+    // Botones: columna a la derecha
+    const btnX = GAME.WIDTH - BUTTON_W / 2 - 48;
+    const step = BUTTON_H + BUTTON_GAP;
+    const startY = cy - 40;
 
-    this.makeButton(cx, startY, 'JUGAR', true, () => {
+    this.makeButton(btnX, startY, 'JUGAR', true, () => {
       this.audio.resume();
       this.audio.playBeep('click', 'ui');
       this.showCharacterSelect();
     });
 
-    this.makeButton(cx, startY + BUTTON_H + BUTTON_GAP, 'MEJORAS', true, () => {
+    this.makeButton(btnX, startY + step, 'MEJORAS', true, () => {
       this.audio.playBeep('click', 'ui');
       SceneManager.go(this, SCENES.UPGRADE);
     });
 
-    this.makeButton(cx, startY + (BUTTON_H + BUTTON_GAP) * 2, 'ESTADÍSTICAS', hasRuns, () => {
+    this.makeButton(btnX, startY + step * 2, 'ESTADÍSTICAS', hasRuns, () => {
       this.audio.playBeep('click', 'ui');
       SceneManager.go(this, SCENES.STATISTICS);
     });
 
-    this.makeButton(cx, startY + (BUTTON_H + BUTTON_GAP) * 3, 'CONFIGURACIÓN', true, () => {
+    this.makeButton(btnX, startY + step * 3, 'CONFIGURACIÓN', true, () => {
       this.audio.playBeep('click', 'ui');
       this.showAudioConfig();
     });
@@ -86,21 +91,27 @@ export class MainMenuScene extends Phaser.Scene {
     enabled: boolean,
     onClick: () => void,
   ): void {
-    const color = enabled ? COLORS.BUTTON : 0x222233;
-    const textColor = enabled ? COLORS.TEXT : COLORS.TEXT_MUTED;
+    const btn = this.add.sprite(x, y, 'ui_button', 0).setDisplaySize(BUTTON_W, BUTTON_H);
+    if (!enabled) btn.setTint(0x666666);
 
-    const bg = this.add.rectangle(x, y, BUTTON_W, BUTTON_H, color)
-      .setInteractive({ useHandCursor: enabled });
-
-    this.add.text(x, y, label, {
-      fontSize: '20px',
-      color: textColor,
+    this.add.text(x, y + 3, label, {
+      fontSize: '15px',
+      color: enabled ? COLORS.TEXT : COLORS.TEXT_MUTED,
+      stroke: '#000000',
+      strokeThickness: 3,
     }).setOrigin(0.5);
 
     if (enabled) {
-      bg.on('pointerover', () => bg.setFillStyle(COLORS.BUTTON_HOVER));
-      bg.on('pointerout', () => bg.setFillStyle(color));
-      bg.on('pointerup', onClick);
+      btn.setInteractive({ useHandCursor: true });
+      btn.on('pointerover', () => {
+        btn.setFrame(1);
+        if (btn.postFX) { btn.postFX.clear(); btn.postFX.addGlow(0xffe680, 4); }
+      });
+      btn.on('pointerout', () => {
+        btn.setFrame(0);
+        if (btn.postFX) btn.postFX.clear();
+      });
+      btn.on('pointerup', onClick);
     }
   }
 
@@ -112,44 +123,76 @@ export class MainMenuScene extends Phaser.Scene {
       fontSize: '26px', color: '#ffff00', fontStyle: 'bold',
     }).setOrigin(0.5));
 
-    const cardW = 280;
-    const cardH = 66;
-    const gap = 8;
-    const cols = 2;
-    const startX = cx - (cols * cardW + (cols - 1) * gap) / 2 + cardW / 2;
-    const startY = 90;
+    // Cards-retrato en 2 filas × 3 columnas (retrato cuadrado, personaje recortado a silueta)
+    const cols = 3;
+    const cardW = 120;
+    const gap = 14;
+    const rowGap = 16;
+    const iconSize = cardW - 12;
+    const ph = iconSize;                            // retrato cuadrado
+    const cardH = 8 + ph + 52;
+    const top = -cardH / 2;
+    const gridW = cols * cardW + (cols - 1) * gap;
+    const startX = cx - gridW / 2 + cardW / 2;
+    const firstRowY = 168;
 
-    CHARACTERS.forEach((c, i) => {
+    // Excluir 'base' (Empleado) de la pantalla de selección; sigue siendo fallback interno.
+    const selectable = CHARACTERS.filter(c => c.id !== 'base');
+    selectable.forEach((c, i) => {
       const col = i % cols;
-      const row = Math.floor(i / cols);
-      const x = startX + col * (cardW + gap);
-      const y = startY + row * (cardH + gap);
+      const rowN = Math.floor(i / cols);
+      const container = this.add.container(startX + col * (cardW + gap), firstRowY + rowN * (cardH + rowGap));
+      overlay.add(container);
 
-      const card = this.add.rectangle(x, y, cardW, cardH, COLORS.BUTTON)
-        .setInteractive({ useHandCursor: true });
-      overlay.add(card);
-      overlay.add(this.add.text(x - cardW / 2 + 10, y - 16, c.name, {
-        fontSize: '15px', color: '#ffffff', fontStyle: 'bold',
-      }).setOrigin(0, 0.5));
-      overlay.add(this.add.text(x - cardW / 2 + 10, y + 2, c.tagline, {
-        fontSize: '10px', color: COLORS.TEXT_MUTED, wordWrap: { width: cardW - 20 },
-      }).setOrigin(0, 0.5));
-      overlay.add(this.add.text(x - cardW / 2 + 10, y + 20, `HP ${c.baseHp}`, {
-        fontSize: '10px', color: '#88ccff',
-      }).setOrigin(0, 0.5));
+      const card = this.add.rectangle(0, 0, cardW, cardH, 0x222230).setStrokeStyle(2, 0x4a4a66);
+      container.add(card);
 
-      card.on('pointerover', () => card.setFillStyle(COLORS.BUTTON_HOVER));
-      card.on('pointerout', () => card.setFillStyle(COLORS.BUTTON));
-      card.on('pointerup', () => {
+      const iconY = top + 6 + ph / 2;
+      const sheetKey = this.textures.exists(`charsheet_${c.id}`) ? `charsheet_${c.id}` : 'charsheet_base';
+      let portrait: Phaser.GameObjects.Sprite | null = null;
+      if (this.textures.exists(sheetKey)) {
+        portrait = this.add.sprite(0, iconY, sheetKey, CHAR_SHEET.IDLE.down)
+          .setDisplaySize(iconSize, ph).setOrigin(0.5);
+        container.add(portrait);
+      } else {
+        container.add(this.add.rectangle(0, iconY, iconSize, ph, 0x000000, 0.25).setStrokeStyle(1, 0x4a4a66));
+        container.add(this.add.text(0, iconY, '◆', { fontSize: '38px', color: '#556' }).setOrigin(0.5));
+      }
+      const walkKey = `${c.id}_walk_down`;
+
+      let ty = top + 6 + ph + 4;
+      const name = this.add.text(0, ty, c.name, {
+        fontSize: '12px', color: '#ffffff', fontStyle: 'bold', wordWrap: { width: cardW - 10 }, align: 'center',
+      }).setOrigin(0.5, 0);
+      container.add(name); ty += name.height + 1;
+      const tag = this.add.text(0, ty, c.tagline, {
+        fontSize: '8px', color: '#9a9ab0', wordWrap: { width: cardW - 10 }, align: 'center',
+      }).setOrigin(0.5, 0);
+      container.add(tag); ty += tag.height + 1;
+      container.add(this.add.text(0, ty, `HP ${c.baseHp}`, { fontSize: '10px', color: '#88ccff' }).setOrigin(0.5, 0));
+
+      const hit = this.add.rectangle(0, 0, cardW, cardH, 0x000000, 0).setInteractive({ useHandCursor: true });
+      container.add(hit);
+      hit.on('pointerover', () => {
+        this.tweens.add({ targets: container, scaleX: 1.06, scaleY: 1.06, duration: 80, ease: 'Cubic.Out' });
+        card.setStrokeStyle(3, 0xffe680);
+        if (portrait && this.anims.exists(walkKey)) portrait.play(walkKey, true);
+      });
+      hit.on('pointerout', () => {
+        this.tweens.add({ targets: container, scaleX: 1, scaleY: 1, duration: 80, ease: 'Cubic.Out' });
+        card.setStrokeStyle(2, 0x4a4a66);
+        if (portrait) { portrait.stop(); portrait.setFrame(CHAR_SHEET.IDLE.down); }
+      });
+      hit.on('pointerup', () => {
         this.audio.playBeep('click', 'ui');
         SceneManager.go(this, SCENES.GAME, { characterId: c.id });
       });
     });
 
-    const back = this.add.rectangle(cx, GAME.HEIGHT - 30, 140, 36, COLORS.BUTTON)
+    const back = this.add.rectangle(cx, GAME.HEIGHT - 28, 140, 34, COLORS.BUTTON)
       .setInteractive({ useHandCursor: true });
     overlay.add(back);
-    overlay.add(this.add.text(cx, GAME.HEIGHT - 30, 'VOLVER', { fontSize: '14px', color: COLORS.TEXT }).setOrigin(0.5));
+    overlay.add(this.add.text(cx, GAME.HEIGHT - 28, 'VOLVER', { fontSize: '14px', color: COLORS.TEXT }).setOrigin(0.5));
     back.on('pointerover', () => back.setFillStyle(COLORS.BUTTON_HOVER));
     back.on('pointerout', () => back.setFillStyle(COLORS.BUTTON));
     back.on('pointerup', () => { this.audio.playBeep('click', 'ui'); overlay.destroy(true); });
