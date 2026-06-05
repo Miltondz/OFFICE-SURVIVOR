@@ -1,5 +1,5 @@
 import type { ItemDefinition, WeaponDefinition, RunModifiers, PlayerState } from '@/types';
-import { COMBAT } from './game.config';
+import { COMBAT, ITEMS_E1 } from './game.config';
 
 // ─── WEAPONS (10) ──────────────────────────────────────────────────────────
 
@@ -582,6 +582,159 @@ export const ITEMS: ItemDefinition[] = [
     category: 'passive',
     tags: ['defensa', 'estrés'],
     applyModifiers: (m: RunModifiers) => { m.damageTakenMult *= 0.90; },
+  },
+
+  // ── §E1 NUEVOS COMUNES (5) ──────────────────────────────────────────────
+
+  {
+    id: 'triple_espresso',
+    name: 'Triple Espresso',
+    description: 'Al recoger cualquier pickup → +25% velocidad de movimiento durante 8s.',
+    rarity: 'common',
+    category: 'passive',
+    tags: ['velocidad', 'pickup'],
+    // Reactive: hook pickup:collected en ItemReactions — nuevo (fase E1)
+  },
+  {
+    id: 'taza_grande',
+    name: 'Taza Grande',
+    description: '+20 HP máximo. Al recoger café, el efecto es ×1.5.',
+    rarity: 'common',
+    category: 'passive',
+    tags: ['hp', 'cafe'],
+    synergyWith: ['cafeteria_vip', 'cafe_solo'],
+    maxStack: 1,
+    onPickup: (p: PlayerState) => ({
+      ...p,
+      maxHp: p.maxHp + ITEMS_E1.TAZA_GRANDE_MAX_HP,
+      hp: p.hp + ITEMS_E1.TAZA_GRANDE_MAX_HP,
+    }),
+    // Café bonus handled in PickupSystem.collect via items check — nuevo (fase E1)
+  },
+  {
+    id: 'sello_de_goma',
+    name: 'Sello de Goma',
+    description: 'Cada 5 kills, el siguiente proyectil hace ×3 daño.',
+    rarity: 'common',
+    category: 'passive',
+    tags: ['daño', 'kill'],
+    // State: ctx.sellaDeGomaKills / ctx.sellaDeGomaReady; WeaponSystem reads ctx.sellaDeGomaReady — nuevo (fase E1)
+    // Reactive: hook enemy:killed en ItemReactions
+  },
+  {
+    id: 'grapadora_turbo',
+    name: 'Grapadora Turbo',
+    description: 'La Stapler Gun dispara una ráfaga de 3 balas.',
+    rarity: 'common',
+    category: 'passive',
+    tags: ['arma', 'stapler_gun'],
+    synergyWith: ['stapler_gun', 'grapas_extra'],
+    maxStack: 1,
+    // WeaponSystem case stapler_gun: burst 3 when item owned — nuevo (fase E1)
+  },
+  {
+    id: 'pelota_stress',
+    name: 'Pelota Anti-Estrés',
+    description: 'Al recibir daño, 30% de probabilidad de anularlo completamente.',
+    rarity: 'common',
+    category: 'passive',
+    tags: ['defensa', 'suerte'],
+    // Player.takeDamage: roll antes de aplicar; si tiene item y roll ok → return — nuevo (fase E1)
+  },
+
+  // ── §E1 NUEVOS RAROS (4) ────────────────────────────────────────────────
+
+  {
+    id: 'combustible_rage',
+    name: 'Combustible Rage',
+    description: 'Cada golpe recibido: +5% daño durante 10s, acumulable hasta ×3.',
+    rarity: 'rare',
+    category: 'passive',
+    tags: ['daño', 'racha'],
+    synergyWith: ['yolo'],
+    maxStack: 1,
+    // Reactive: hook player:hit en ItemReactions — nuevo (fase E1)
+  },
+  {
+    id: 'iman_de_monedas',
+    name: 'Imán de Monedas',
+    description: 'Radio de recogida ×4 y las monedas se mueven hacia ti.',
+    rarity: 'rare',
+    category: 'passive',
+    tags: ['economía', 'pickup'],
+    synergyWith: ['stock_options', 'linkedin_premium'],
+    maxStack: 1,
+    applyModifiers: (m: RunModifiers) => {
+      // pickupRange stored for future pickup-radius expansion; attraction handled in PickupSystem — nuevo (fase E1)
+      m.pickupRange += ITEMS_E1.IMAN_ATTRACT_RANGE;
+    },
+    // Coin attraction in PickupSystem.update when item owned — nuevo (fase E1)
+  },
+  {
+    id: 'doble_disparo',
+    name: 'Doble Disparo',
+    description: '25% de probabilidad de disparar 2 proyectiles en vez de 1.',
+    rarity: 'rare',
+    category: 'passive',
+    tags: ['proyectiles', 'suerte'],
+    // WeaponSystem: roll per shot; si activo, spawn 1 proyectil extra idéntico — nuevo (fase E1)
+  },
+  {
+    id: 'escudo_grapas',
+    name: 'Escudo de Grapas',
+    description: 'Absorbe el primer golpe de cada oleada sin daño. Se recarga entre oleadas.',
+    rarity: 'rare',
+    category: 'passive',
+    tags: ['defensa', 'oleada'],
+    maxStack: 1,
+    // ctx.escudoGrapasActive reset en wave:start; consume en Player.takeDamage — nuevo (fase E1)
+  },
+
+  // ── §E1 NUEVOS ÉPICOS (2) ───────────────────────────────────────────────
+
+  {
+    id: 'cadena_de_kills',
+    name: 'Cadena de Kills',
+    description: 'Kills consecutivos sin recibir daño: +2% daño acumulativo. Se reinicia al recibir daño.',
+    rarity: 'epic',
+    category: 'passive',
+    tags: ['daño', 'racha'],
+    synergyWith: ['spreadsheet_god'],
+    maxStack: 1,
+    // Reactive: hooks enemy:killed / player:hit en ItemReactions — nuevo (fase E1)
+  },
+  {
+    id: 'explosion_al_matar',
+    name: 'Explosión al Matar',
+    description: 'Al matar un enemigo élite → explosión AoE radio 150px por 50% del HP del élite.',
+    rarity: 'epic',
+    category: 'passive',
+    tags: ['aoe', 'kill', 'élite'],
+    maxStack: 1,
+    // Reactive: hook enemy:killed isElite → enemySys.damageInRadius — nuevo (fase E1)
+  },
+
+  // ── §E1 NUEVOS LEGENDARIOS (2) ──────────────────────────────────────────
+
+  {
+    id: 'modo_dios_temporal',
+    name: 'Modo Dios Temporal',
+    description: 'Cada 60s: 3s de invencibilidad y daño ×5.',
+    rarity: 'legendary',
+    category: 'passive',
+    tags: ['invencibilidad', 'daño'],
+    maxStack: 1,
+    // Timer en ItemReactions; ctx.modoDiosActive / ctx.modoDiosDamageBoost leídos por Player / WeaponSystem — nuevo (fase E1)
+  },
+  {
+    id: 'ultimo_cartucho',
+    name: 'Último Cartucho',
+    description: 'Cuando HP ≤ 20%, todas las armas disparan al triple de cadencia.',
+    rarity: 'legendary',
+    category: 'passive',
+    tags: ['cadencia', 'supervivencia'],
+    maxStack: 1,
+    // WeaponSystem: if item owned y hp/maxHp ≤ ULTIMO_HP_THRESHOLD → fireRate ×ULTIMO_FIRERATE_MULT — nuevo (fase E1)
   },
 ];
 

@@ -1,6 +1,7 @@
 // src/scenes/HUDScene.ts
 import Phaser from 'phaser';
-import { SCENES, GAME, HUD, STRESS_COLORS, RUN_DURATION_S } from '@/config/game.config';
+import { SCENES, GAME, HUD, STRESS_COLORS, RUN_DURATION_S, WAVES } from '@/config/game.config';
+import type { WaveType } from '@/config/game.config';
 import type { RunContext } from '@/systems/RunContext';
 import { LevelSystem } from '@/systems/LevelSystem';
 import { formatTime } from '@/utils';
@@ -113,10 +114,18 @@ export class HUDScene extends Phaser.Scene {
   // Boss bar
   private bossBarContainer!: Phaser.GameObjects.Container;
   private bossBarFill!: Phaser.GameObjects.Rectangle;
+  private bossBarLabel!: Phaser.GameObjects.Text;
 
   // §7.7 burnout toast
   private burnoutToast: Phaser.GameObjects.Text | null = null;
   private prevStressState = '';
+
+  // §B wave-type announcement banner
+  private waveBanner: Phaser.GameObjects.Text | null = null;
+  private waveBannerTween: Phaser.Tweens.Tween | null = null;
+
+  // §C — flag: a miniboss:spawn just fired (so boss:spawned should not overwrite label to CEO)
+  private pendingMinibossLabel = false;
 
   constructor() {
     super({ key: SCENES.HUD });
@@ -136,11 +145,11 @@ export class HUDScene extends Phaser.Scene {
     const bossH = 10;
     const bossBg = this.add.rectangle(W / 2, bossH / 2, W, bossH, 0x440000).setOrigin(0.5);
     this.bossBarFill = this.add.rectangle(0, bossH / 2, W, bossH, 0xff2222).setOrigin(0, 0.5);
-    const bossLbl = this.add.text(W / 2, bossH / 2, 'CEO', { fontSize: '9px', color: '#ffffff' }).setOrigin(0.5);
-    this.bossBarContainer = this.add.container(0, 0, [bossBg, this.bossBarFill, bossLbl]).setDepth(6).setVisible(false);
+    this.bossBarLabel = this.add.text(W / 2, bossH / 2, 'CEO', { fontSize: '9px', color: '#ffffff' }).setOrigin(0.5);
+    this.bossBarContainer = this.add.container(0, 0, [bossBg, this.bossBarFill, this.bossBarLabel]).setDepth(6).setVisible(false);
 
     // ---- Timer + Oleada (centro-arriba) ----
-    this.timerText = this.add.text(W / 2, 14, '10:00', {
+    this.timerText = this.add.text(W / 2, 14, '14:00', {
       fontSize: '20px', color: '#ffffff', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5, 0).setDepth(3);
     this.waveText = this.add.text(W / 2, 40, 'Oleada 0', {
@@ -220,9 +229,38 @@ export class HUDScene extends Phaser.Scene {
 
     // ---- Boss events ----
     const bus = this.ctx.bus;
-    bus.on('boss:spawned', () => this.bossBarContainer.setVisible(true));
+    bus.on('boss:spawned', () => {
+      // Label is set by miniboss:spawn (fires before boss:spawned for minibosses).
+      // For CEO (no preceding miniboss:spawn), reset label to CEO here.
+      // We track whether a miniboss:spawn just fired via a flag.
+      if (!this.pendingMinibossLabel) {
+        this.bossBarLabel.setText('CEO');
+        this.bossBarFill.setFillStyle(0xff2222);
+      }
+      this.pendingMinibossLabel = false;
+      this.bossBarContainer.setVisible(true);
+    });
     bus.on('boss:defeated', () => this.bossBarContainer.setVisible(false));
+    // §C — also hide on miniboss death
+    bus.on('miniboss:defeated', (_p: { id: string }) => this.bossBarContainer.setVisible(false));
     bus.on('boss:hp', (p: { ratio: number }) => { this.bossBarFill.width = Math.max(0, p.ratio) * W; });
+
+    // ---- §C — miniboss events (set label before boss:spawned fires from MiniBoss ctor) ----
+    bus.on('miniboss:spawn', (p: { id: string }) => {
+      const labels: Record<string, string> = {
+        supervisor: 'SUPERVISOR',
+        printer_industrial: 'IMPRESORA INDUSTRIAL',
+        committee: 'COMITÉ DE EVALUACIÓN',
+      };
+      const colors: Record<string, number> = {
+        supervisor: 0xdd6600,
+        printer_industrial: 0x9933cc,
+        committee: 0x888888,
+      };
+      this.bossBarLabel.setText(labels[p.id] ?? p.id.toUpperCase());
+      this.bossBarFill.setFillStyle(colors[p.id] ?? 0xff2222);
+      this.pendingMinibossLabel = true;
+    });
 
     // ---- Shop visibility (hide HUD while shop is open) ----
     bus.on('shop:opened', () => this.scene.setVisible(false));
@@ -230,6 +268,12 @@ export class HUDScene extends Phaser.Scene {
 
     // ---- §7.5 Countdown from SpawnDirector ----
     bus.on('wave:countdown', (p: { seconds: number }) => this.showCountdown(p.seconds));
+
+    // ---- §B wave-type announcement banner ----
+    bus.on('wave:announce', (p: { type: WaveType; wave: number }) => this.showWaveBanner(p.type, p.wave));
+    bus.on('miniboss:announce', (_p: { id: string; wave: number }) => {
+      // Banner already shown by wave:announce (type='miniboss'); no duplicate needed.
+    });
   }
 
   update(): void {
@@ -291,7 +335,7 @@ export class HUDScene extends Phaser.Scene {
     this.timerText.setColor(remaining <= 60 ? '#ff4444' : '#ffffff');
 
     // Wave
-    this.waveText.setText(this.ctx.infinite ? `Oleada ${this.ctx.wave}` : `Oleada ${this.ctx.wave} / 10`);
+    this.waveText.setText(this.ctx.infinite ? `Oleada ${this.ctx.wave}` : `Oleada ${this.ctx.wave} / ${WAVES.BOSS_WAVE}`);
 
     // Inventario (reconstruir si cambió la cantidad)
     const total = p.weapons.length + p.items.length;
@@ -299,6 +343,76 @@ export class HUDScene extends Phaser.Scene {
       this.invCount = total;
       this.rebuildInventory();
     }
+  }
+
+  // §B — wave-type announcement banner (2.5s, centered, color by type)
+  private showWaveBanner(type: WaveType, wave: number): void {
+    // Cancel previous banner if still showing
+    if (this.waveBannerTween) {
+      this.waveBannerTween.stop();
+      this.waveBannerTween = null;
+    }
+    if (this.waveBanner) {
+      this.waveBanner.destroy();
+      this.waveBanner = null;
+    }
+
+    const cx = GAME.WIDTH / 2;
+    const cy = GAME.HEIGHT / 2 - 60;
+
+    const BANNER_DURATION_MS = 2500;
+
+    type BannerConfig = { text: string; color: string; pulse: boolean };
+    const configs: Record<WaveType, BannerConfig> = {
+      normal:     { text: `OLEADA ${wave}`,         color: '#ffffff', pulse: false },
+      swarm:      { text: `⚡ AVALANCHA`,            color: '#ffee00', pulse: false },
+      elite_only: { text: `💀 OLEADA ÉLITE`,         color: '#ff4444', pulse: false },
+      bonus:      { text: `💰 LLUVIA DE DINERO`,     color: '#ffd700', pulse: false },
+      miniboss:   { text: `⚠ JEFE MENOR`,            color: '#ff8800', pulse: true  },
+      boss:       { text: `☠ EL CEO — FASE FINAL`,   color: '#ff2222', pulse: true  },
+    };
+    const cfg = configs[type] ?? configs.normal;
+
+    this.waveBanner = this.add.text(cx, cy, cfg.text, {
+      fontSize: '28px',
+      color: cfg.color,
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(30).setScrollFactor(0).setAlpha(0);
+
+    // Fade in
+    this.tweens.add({
+      targets: this.waveBanner,
+      alpha: 1,
+      scaleX: { from: 1.4, to: 1.0 },
+      scaleY: { from: 1.4, to: 1.0 },
+      duration: 300,
+      ease: 'Cubic.Out',
+    });
+
+    if (cfg.pulse) {
+      this.waveBannerTween = this.tweens.add({
+        targets: this.waveBanner,
+        alpha: { from: 1, to: 0.5 },
+        duration: 350,
+        yoyo: true,
+        repeat: -1,
+      });
+    }
+
+    // Auto-hide after duration
+    this.time.delayedCall(BANNER_DURATION_MS, () => {
+      if (!this.waveBanner) return;
+      if (this.waveBannerTween) { this.waveBannerTween.stop(); this.waveBannerTween = null; }
+      this.tweens.add({
+        targets: this.waveBanner,
+        alpha: 0,
+        duration: 300,
+        ease: 'Linear',
+        onComplete: () => { this.waveBanner?.destroy(); this.waveBanner = null; },
+      });
+    });
   }
 
   // §7.5 — countdown display

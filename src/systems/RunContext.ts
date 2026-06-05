@@ -31,6 +31,13 @@ export interface RunContext {
   curseOpenOfficeAura: boolean;            // open_office: player aura slows nearby enemies
   curseHrEveryWave: boolean;               // open_office: HR Reps from wave 1
   playerUpgradeIds: string[];              // mejoras de personaje adquiridas (se reaplican en recomputeModifiers)
+  // §E1 — state fields for new items (not wiped by recomputeModifiers)
+  sellaDeGomaKills: number;               // sello_de_goma: kills accumulated toward next powered shot
+  sellaDeGomaReady: boolean;              // sello_de_goma: next projectile deals ×3 damage
+  escudoGrapasActive: boolean;            // escudo_grapas: shield absorbs first hit of wave
+  modoDiosActive: boolean;                // modo_dios_temporal: currently in god mode
+  modoDiosDamageBoost: boolean;           // modo_dios_temporal: flag read by WeaponSystem for ×5 dmg
+  tripleEspressoSpeedBonus: number;       // triple_espresso: current speed bonus applied to player.speed
 }
 
 export function createRunContext(): RunContext {
@@ -82,6 +89,13 @@ export function createRunContext(): RunContext {
     curseOpenOfficeAura: false,
     curseHrEveryWave: false,
     playerUpgradeIds: [],
+    // §E1
+    sellaDeGomaKills: 0,
+    sellaDeGomaReady: false,
+    escudoGrapasActive: false,
+    modoDiosActive: false,
+    modoDiosDamageBoost: false,
+    tripleEspressoSpeedBonus: 0,
   };
 }
 

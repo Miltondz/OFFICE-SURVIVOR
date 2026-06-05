@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COMBAT, SPAWN, COLORS_GAME, WAVE_EVENTS, CURSES } from '@/config/game.config';
+import { COMBAT, SPAWN, COLORS_GAME, WAVE_EVENTS, CURSES, ITEMS_E1 } from '@/config/game.config';
 import type { RunContext } from './RunContext';
 import type { WeaponDefinition } from '@/types';
 import { Projectile } from '@/entities/Projectile';
@@ -26,6 +26,9 @@ export class WeaponSystem {
   weapons: WeaponInstance[] = [];
   projectilePool!: Phaser.GameObjects.Group;
 
+  // Objetivo de jefe/miniboss (no están en enemyPool): proveído por GameScene.
+  private bossTargetProvider: (() => { x: number; y: number } | null) | null = null;
+
   // Pooled turret group for impresora_aliada (PrinterTurret entity)
   turretPool!: Phaser.GameObjects.Group;
 
@@ -38,6 +41,11 @@ export class WeaponSystem {
   constructor(scene: Phaser.Scene, ctx: RunContext) {
     this.scene = scene;
     this.ctx = ctx;
+  }
+
+  /** GameScene inyecta un getter de la posición del jefe/miniboss activo (o null). */
+  setBossTargetProvider(fn: () => { x: number; y: number } | null): void {
+    this.bossTargetProvider = fn;
   }
 
   init(enemySys: EnemySystem, zonePool: Phaser.GameObjects.Group): void {
@@ -144,12 +152,22 @@ export class WeaponSystem {
       if (!def) continue;
 
       const range = def.range * this.ctx.modifiers.rangeMult;
-      const target = this.enemySys.getNearestEnemy(px, py, range);
+      let target: { x: number; y: number } | null = this.enemySys.getNearestEnemy(px, py, range);
+      // Sin enemigos normales: apuntar al jefe/miniboss si está en rango.
+      if (!target && this.bossTargetProvider) {
+        const bt = this.bossTargetProvider();
+        if (bt && Phaser.Math.Distance.Between(px, py, bt.x, bt.y) <= range) target = bt;
+      }
 
+      // §E1 ultimo_cartucho: ≤20% HP → cadencia ×3 — nuevo (fase E1)
+      const ultimoMult = (this.ctx.player.items.includes('ultimo_cartucho')
+        && this.ctx.player.hp / this.ctx.player.maxHp <= ITEMS_E1.ULTIMO_HP_THRESHOLD)
+        ? ITEMS_E1.ULTIMO_FIRERATE_MULT : 1;
       const fireRate = def.fireRate
         * (1 + (inst.level - 1) * COMBAT.WEAPON_LEVEL_FIRERATE_STEP)
         * inst.fireRateMult
-        * this.ctx.modifiers.fireRateMult;  // §7.2 stat_firerate upgrade
+        * this.ctx.modifiers.fireRateMult  // §7.2 stat_firerate upgrade
+        * ultimoMult;
       const cooldown = 1000 / fireRate;
 
       if (time - inst.lastFiredAt < cooldown) continue;
@@ -221,8 +239,10 @@ export class WeaponSystem {
         break;
       }
       case 'stapler_gun': {
-        for (let i = 0; i < projCount; i++) {
-          const a = baseAngle + Phaser.Math.DegToRad((i - (projCount - 1) / 2) * 5);
+        // §E1 grapadora_turbo: burst of 3 instead of 1 — nuevo (fase E1)
+        const staplerCount = this.ctx.player.items.includes('grapadora_turbo') ? 3 : projCount;
+        for (let i = 0; i < staplerCount; i++) {
+          const a = baseAngle + Phaser.Math.DegToRad((i - (staplerCount - 1) / 2) * 5);
           this.spawnProjectile(px, py, Math.cos(a) * speed * 1.5, Math.sin(a) * speed * 1.5, dmg, def.id, pierce, bounce, 'none', COMBAT.PROJECTILE_LIFESPAN_MS, isCrit);
         }
         break;
@@ -309,6 +329,24 @@ export class WeaponSystem {
         break;
       }
     }
+
+    // §E1 doble_disparo: 25% chance to fire 1 extra projectile at same angle — nuevo (fase E1)
+    // Applies to projectile weapons only (skip laser, extintor, impresora_aliada, whiteboard_marker zone)
+    if (this.ctx.player.items.includes('doble_disparo')
+      && def.id !== 'debug_laser' && def.id !== 'extintor' && def.id !== 'impresora_aliada'
+      && Math.random() < ITEMS_E1.DOBLE_DISPARO_CHANCE) {
+      const speed2 = COMBAT.PROJECTILE_DEFAULT_SPEED * this.ctx.modifiers.projectileSpeedMult;
+      const { dmg: dmg2, isCrit: isCrit2 } = this.getDamageWithCrit(def, inst);
+      this.spawnProjectile(
+        px, py,
+        Math.cos(baseAngle) * speed2,
+        Math.sin(baseAngle) * speed2,
+        dmg2, def.id,
+        this.ctx.modifiers.pierce ? 99 : 0,
+        this.ctx.modifiers.bounce,
+        'none', COMBAT.PROJECTILE_LIFESPAN_MS, isCrit2,
+      );
+    }
   }
 
   /** Draw a thin beam rectangle from (x1,y1) to (x2,y2) for LASER_FLASH_MS ms. */
@@ -357,6 +395,17 @@ export class WeaponSystem {
       * this.ctx.modifiers.damageMult
       * inst.damageMult
       * this.ctx.character.perWeaponDamageMult;   // Freelancer ×1.8
+
+    // §E1 sello_de_goma: next projectile ×3 damage — nuevo (fase E1)
+    if (this.ctx.sellaDeGomaReady && this.ctx.player.items.includes('sello_de_goma')) {
+      dmg *= ITEMS_E1.SELLO_DAMAGE_MULT;
+      this.ctx.sellaDeGomaReady = false;
+    }
+
+    // §E1 modo_dios_temporal: damage ×5 during god mode — nuevo (fase E1)
+    if (this.ctx.modoDiosDamageBoost && this.ctx.player.items.includes('modo_dios_temporal')) {
+      dmg *= ITEMS_E1.MODO_DIOS_DAMAGE_MULT;
+    }
 
     // Crit. Director "Visión Estratégica": all damage crits while in Burnout (90–99).
     let isCrit = false;

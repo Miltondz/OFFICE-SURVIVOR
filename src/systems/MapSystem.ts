@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, MAP } from '@/config/game.config';
+import { MAP } from '@/config/game.config';
 import { EFFECTS } from '@/config/effects.config';
 import type { RunContext } from './RunContext';
 import { recomputeModifiers } from './RunContext';
@@ -47,43 +47,75 @@ export class MapSystem {
     const plants = this.scene.physics.add.staticGroup();  // blocks enemies only
     const extintores = this.scene.physics.add.staticGroup();
 
-    const cx = GAME.WIDTH / 2;
-    const cy = GAME.HEIGHT / 2;
+    const spawnX = MAP.PLAYER_SPAWN_X;
+    const spawnY = MAP.PLAYER_SPAWN_Y;
 
-    // Random obstacles (avoid the center spawn zone).
+    // Random obstacles distributed on a grid across the full map.
+    // Max 1 obstacle per OBSTACLE_GRID_CELL, excluding SPAWN_FREE_RADIUS around player spawn.
+    const cellW = MAP.OBSTACLE_GRID_CELL;
+    const cellH = MAP.OBSTACLE_GRID_CELL;
+    const cols = Math.floor(MAP.WIDTH / cellW);
+    const rows = Math.floor(MAP.HEIGHT / cellH);
+
+    // Build list of valid cell indices (shuffle then take count)
+    const allCells: number[] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cx = c * cellW + cellW / 2;
+        const cy = r * cellH + cellH / 2;
+        if (Phaser.Math.Distance.Between(cx, cy, spawnX, spawnY) >= MAP.SPAWN_FREE_RADIUS) {
+          allCells.push(r * cols + c);
+        }
+      }
+    }
+    // Fisher-Yates shuffle
+    for (let i = allCells.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [allCells[i], allCells[j]] = [allCells[j], allCells[i]];
+    }
+
     const count = Phaser.Math.Between(MAP.OBSTACLE_COUNT_MIN, MAP.OBSTACLE_COUNT_MAX);
-    for (let i = 0; i < count; i++) {
+    const chosen = allCells.slice(0, count);
+    for (const idx of chosen) {
+      const r = Math.floor(idx / cols);
+      const c = idx % cols;
+      const x = c * cellW + cellW / 2;
+      const y = r * cellH + cellH / 2;
       const roll = Math.random();
       const spec = roll < 0.45 ? MAP.DESK : roll < 0.8 ? MAP.CABINET : MAP.PLANT;
-      let x = 0, y = 0, tries = 0;
-      do {
-        x = Phaser.Math.Between(60, GAME.WIDTH - 60);
-        y = Phaser.Math.Between(60, GAME.HEIGHT - 60);
-        tries++;
-      } while (Phaser.Math.Distance.Between(x, y, cx, cy) < MAP.CENTER_EXCLUSION && tries < 10);
-
       const key = spec === MAP.DESK ? 'desk' : spec === MAP.CABINET ? 'cabinet' : 'plant';
       const rect = this.scene.add.rectangle(x, y, spec.w, spec.h, spec.color).setDepth(1);
       this.addProp(key, x, y, rect);
       (spec === MAP.PLANT ? plants : solid).add(rect);
     }
 
-    // Functional objects
-    const coffee = this.scene.add.rectangle(cx, 70, MAP.FUNC_SIZE, MAP.FUNC_SIZE, MAP.COFFEE_COLOR).setDepth(1);
-    if (!this.addProp('coffee', cx, 70, coffee)) {
-      this.scene.add.text(cx, 70, '☕', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
+    // Functional objects — positioned at map-relative spots spread around the map.
+    // Coffee machine: upper-left quadrant.
+    const coffeeX = Math.round(MAP.WIDTH * 0.25);
+    const coffeeY = Math.round(MAP.HEIGHT * 0.25);
+    const coffee = this.scene.add.rectangle(coffeeX, coffeeY, MAP.FUNC_SIZE, MAP.FUNC_SIZE, MAP.COFFEE_COLOR).setDepth(1);
+    if (!this.addProp('coffee', coffeeX, coffeeY, coffee)) {
+      this.scene.add.text(coffeeX, coffeeY, '☕', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
     }
-    this.addSteam(cx, 70 - 22);   // vaho en bucle sobre la cafetera
+    this.addSteam(coffeeX, coffeeY - 22);   // vaho en bucle sobre la cafetera
 
-    this.vending = this.scene.add.rectangle(cx, GAME.HEIGHT - 70, MAP.FUNC_SIZE, MAP.FUNC_SIZE, MAP.VENDING_COLOR).setDepth(1);
-    if (!this.addProp('vending', cx, GAME.HEIGHT - 70, this.vending)) {
-      this.scene.add.text(cx, GAME.HEIGHT - 70, '🥤', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
+    // Vending machine: lower-right quadrant.
+    const vendingX = Math.round(MAP.WIDTH * 0.75);
+    const vendingY = Math.round(MAP.HEIGHT * 0.75);
+    this.vending = this.scene.add.rectangle(vendingX, vendingY, MAP.FUNC_SIZE, MAP.FUNC_SIZE, MAP.VENDING_COLOR).setDepth(1);
+    if (!this.addProp('vending', vendingX, vendingY, this.vending)) {
+      this.scene.add.text(vendingX, vendingY, '🥤', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
     }
     solid.add(this.vending); // staticGroup.add creates the static body
 
-    // Wall extinguishers in the corners (destructible).
-    const corners = [[60, 60], [GAME.WIDTH - 60, 60], [60, GAME.HEIGHT - 60], [GAME.WIDTH - 60, GAME.HEIGHT - 60]];
-    for (const [ex, ey] of corners) {
+    // Wall extinguishers — spread at map-relative positions (not screen corners).
+    const extCorners: [number, number][] = [
+      [120, 120],
+      [MAP.WIDTH - 120, 120],
+      [120, MAP.HEIGHT - 120],
+      [MAP.WIDTH - 120, MAP.HEIGHT - 120],
+    ];
+    for (const [ex, ey] of extCorners) {
       const e = this.scene.add.rectangle(ex, ey, 24, 24, MAP.EXTINTOR_COLOR)
         .setStrokeStyle(2, MAP.EXTINTOR_BORDER).setDepth(1);
       const img = this.addProp('extintor', ex, ey, e);

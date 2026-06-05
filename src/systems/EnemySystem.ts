@@ -93,6 +93,7 @@ export class EnemySystem {
       (_playerGO, enemyGO) => {
         const enemy = enemyGO as Enemy;
         if (!enemy.isActive2 || enemy.ally) return;  // allies don't damage the player
+        if (enemy.isBonus) return;  // §B bonus enemies deal no contact damage
         if (enemy.contactCooldown > 0) return;
         // NDAs: HR Rep can't slow
         if (enemy.enemyType === 'hr_rep' && this.ctx.player.items.includes('ndas_firmadas')) return;
@@ -115,6 +116,20 @@ export class EnemySystem {
     );
 
     // Damage zones ↔ player (handled manually in update)
+  }
+
+  /** §B — spawn a bonus enemy (no contact damage, ×2 coins, auto-despawn). */
+  spawnBonus(typeId: EnemyType, x: number, y: number): void {
+    this.spawn(typeId, x, y);
+    // Mark the most-recently activated enemy as bonus
+    const children = this.enemyPool.getChildren();
+    for (let i = children.length - 1; i >= 0; i--) {
+      const e = children[i] as Enemy;
+      if (e.isActive2 && e.enemyType === typeId) {
+        e.markAsBonus();
+        break;
+      }
+    }
   }
 
   spawn(typeId: EnemyType, x: number, y: number): void {
@@ -209,6 +224,13 @@ export class EnemySystem {
         if (e.fanTimer >= SPAWN.PRINTER_FAN_INTERVAL_MS) {
           e.fanTimer = 0;
           this.firePrinterFan(e, time);
+        }
+      } else if (e.enemyType === 'cleaning_lady') {
+        // Carrito eléctrico de pulido: deja rastro de piso pulido (zona que daña) al moverse.
+        e.polishTimer += delta;
+        if (e.polishTimer >= SPAWN.POLISH_INTERVAL_MS) {
+          e.polishTimer = 0;
+          this.spawnZone(e.x, e.y, SPAWN.POLISH_RADIUS, SPAWN.POLISH_DPS, SPAWN.POLISH_DURATION_MS);
         }
       }
     });

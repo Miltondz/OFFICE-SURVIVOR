@@ -1,12 +1,13 @@
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
 export type ItemCategory = 'passive' | 'consumable' | 'weapon';
 export type EnemyType = 'angry_email' | 'toxic_manager' | 'angry_client'
-  | 'hr_rep' | 'possessed_printer' | 'auditor' | 'ceo';
+  | 'hr_rep' | 'possessed_printer' | 'auditor' | 'cleaning_lady' | 'ceo';
 
 export type GameEventName =
   | 'player:hit' | 'player:died' | 'player:level_up' | 'player:burnout'
   | 'enemy:spawned' | 'enemy:killed' | 'enemy:hit'
   | 'stress:changed' | 'wave:start' | 'wave:complete' | 'wave:cleared'
+  | 'wave:announce' | 'miniboss:announce' | 'miniboss:spawn' | 'miniboss:defeated' | 'miniboss:spawnZone'
   | 'pickup:collected' | 'boss:spawned' | 'boss:phase2' | 'boss:defeated'
   | 'damage:dealt' | 'item:acquired' | 'upgrade:weapon_selected' | 'upgrade:item_selected'
   | 'playerUpgrade:selected' | 'shop:closed' | 'boss:hp' | 'curse:applied';

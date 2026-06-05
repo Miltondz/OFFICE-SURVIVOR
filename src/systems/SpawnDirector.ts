@@ -1,4 +1,6 @@
-import { WAVES, GAME, SPAWN } from '@/config/game.config';
+import { WAVES, MAP, SPAWN } from '@/config/game.config';
+import type { WaveType } from '@/config/game.config';
+import { ENEMIES } from '@/config/enemies.config';
 import type { EnemyType } from '@/types';
 import type { RunContext } from './RunContext';
 import type { EnemySystem } from './EnemySystem';
@@ -8,12 +10,12 @@ const WAVE_UNLOCK_TABLE: Record<number, EnemyType[]> = {
   1: ['angry_email'],
   2: ['angry_email'],
   3: ['angry_email', 'toxic_manager', 'angry_client'],
-  4: ['angry_email', 'toxic_manager', 'angry_client'],
-  5: ['angry_email', 'toxic_manager', 'angry_client', 'hr_rep', 'possessed_printer'],
-  6: ['angry_email', 'toxic_manager', 'angry_client', 'hr_rep', 'possessed_printer'],
-  7: ['angry_email', 'toxic_manager', 'angry_client', 'hr_rep', 'possessed_printer', 'auditor'],
-  8: ['angry_email', 'toxic_manager', 'angry_client', 'hr_rep', 'possessed_printer', 'auditor'],
-  9: ['angry_email', 'toxic_manager', 'angry_client', 'hr_rep', 'possessed_printer', 'auditor'],
+  4: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady'],
+  5: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer'],
+  6: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer'],
+  7: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor'],
+  8: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor'],
+  9: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor'],
 };
 
 type WaveState =
@@ -21,7 +23,8 @@ type WaveState =
   | 'clearing'       // all spawned, waiting for last enemy to die
   | 'intermission'   // wave cleared; overlays (level-up / shop) + countdown
   | 'countdown'      // 4s "PREPÁRATE" banner before next wave spawns
-  | 'boss';          // boss active — no wave progression
+  | 'boss'           // boss active — no wave progression
+  | 'miniboss';      // §C miniboss active — waiting for miniboss:defeated
 
 /**
  * §7.5 — SpawnDirector state machine.
@@ -47,17 +50,36 @@ export class SpawnDirector {
 
   private infinite = false;        // ipo: keep spawning waves past the boss
 
+  // §B — current wave type
+  private currentWaveType: WaveType = 'normal';
+
+  // Viewport provider for camera-relative spawn (injected from GameScene)
+  private viewportProvider: (() => Phaser.Geom.Rectangle) | null = null;
+
   // Callbacks
   private onCountdownTick: ((seconds: number) => void) | null = null;
 
   constructor(ctx: RunContext, enemySys: EnemySystem) {
     this.ctx = ctx;
     this.enemySys = enemySys;
+
+    // §C — when miniboss dies, transition to intermission (wave cleared)
+    ctx.bus.on('miniboss:defeated', (_p: { id: string }) => {
+      if (this.state === 'miniboss') {
+        this.state = 'intermission';
+        this.ctx.bus.emit('wave:cleared', { wave: this.ctx.wave });
+      }
+    });
   }
 
   /** Called by GameScene to wire countdown UI updates. */
   setCountdownCallback(cb: (seconds: number) => void): void {
     this.onCountdownTick = cb;
+  }
+
+  /** Inject a getter for the camera's current world viewport so spawns happen off-screen. */
+  setViewportProvider(fn: () => Phaser.Geom.Rectangle): void {
+    this.viewportProvider = fn;
   }
 
   /** Trigger wave 1 immediately at game start (called by GameScene.create). */
@@ -90,6 +112,7 @@ export class SpawnDirector {
         break;
       case 'intermission':
       case 'boss':
+      case 'miniboss':
         // Driven by external events; nothing to tick here.
         break;
     }
@@ -104,9 +127,20 @@ export class SpawnDirector {
     this.spawnTimer -= dtS;
     if (this.spawnTimer <= 0) {
       const type = this.spawnQueue.shift()!;
-      const pos = this.getEdgeSpawnPos();
-      this.enemySys.spawn(type, pos.x, pos.y);
-      this.spawnTimer = this.spawnIntervalForWave(this.ctx.wave);
+      // §B swarm: spawn from random of 4 sides quasi-simultaneously (use min interval)
+      // §B bonus: use spawnBonus instead of spawn
+      if (this.currentWaveType === 'bonus') {
+        const pos = this.getEdgeSpawnPos();
+        this.enemySys.spawnBonus(type, pos.x, pos.y);
+      } else {
+        const pos = this.getEdgeSpawnPos();
+        this.enemySys.spawn(type, pos.x, pos.y);
+      }
+      // Swarm uses minimum spawn interval for rapid flooding
+      const interval = this.currentWaveType === 'swarm'
+        ? WAVES.SPAWN_INTERVAL_MIN
+        : this.spawnIntervalForWave(this.ctx.wave);
+      this.spawnTimer = interval;
     }
   }
 
@@ -141,8 +175,25 @@ export class SpawnDirector {
     this.ctx.bus.emit('wave:complete', { wave: this.ctx.wave - 1 }); // legacy compat
     this.ctx.bus.emit('wave:start', { wave });
 
-    // Build spawn queue from budget
-    this.spawnQueue = this.buildSpawnQueue(wave);
+    // §B — announce wave type before spawning
+    const waveType: WaveType = WAVES.WAVE_SEQUENCE[wave] ?? 'normal';
+    this.currentWaveType = waveType;
+    this.ctx.bus.emit('wave:announce', { type: waveType, wave });
+
+    // §C — miniboss: real miniboss entity; enter 'miniboss' state (no auto-clear)
+    if (waveType === 'miniboss') {
+      const minibossId = WAVES.WAVE_MINIBOSS[wave] ?? 'supervisor';
+      this.ctx.bus.emit('miniboss:announce', { id: minibossId, wave });
+      // Emit spawn event — GameScene instantiates the real miniboss
+      this.ctx.bus.emit('miniboss:spawn', { id: minibossId });
+      this.state = 'miniboss';
+      this.spawnQueue = [];
+      return; // bypass the normal spawning state
+    } else {
+      // Build spawn queue from budget according to type
+      this.spawnQueue = this.buildSpawnQueue(wave, waveType);
+    }
+
     this.spawnTimer = 0;
     this.state = 'spawning';
   }
@@ -150,10 +201,11 @@ export class SpawnDirector {
   private beginNextWave(): void {
     const nextWave = this.ctx.wave + 1;
 
-    // Boss wave
+    // Boss wave (wave 13 — see WAVES.BOSS_WAVE)
     if (!this.infinite && nextWave >= WAVES.BOSS_WAVE) {
       this.ctx.wave = WAVES.BOSS_WAVE;
       this.state = 'boss';
+      this.ctx.bus.emit('wave:announce', { type: 'boss' as WaveType, wave: WAVES.BOSS_WAVE });
       this.ctx.bus.emit('wave:start', { wave: WAVES.BOSS_WAVE });
       this.ctx.bus.emit('boss:spawned');
       return;
@@ -167,8 +219,14 @@ export class SpawnDirector {
    * Budget = BASE_BUDGET + round(wave × BUDGET_GROWTH).
    * Elites cost ELITE_COST pts; normals cost 1 pt.
    * Elite chance starts at ELITE_MIN_WAVE and rises by ELITE_CHANCE_PER_WAVE.
+   *
+   * §B — waveType drives quantity/pool:
+   *   normal     → current budget behavior
+   *   swarm      → ×SWARM_COUNT_MULT count, only hp ≤ SWARM_HP_THRESHOLD enemies, fast spawn
+   *   elite_only → budget × ELITE_ONLY_BUDGET_MULT, only elites
+   *   bonus      → same count as normal, all flagged isBonus (handled via spawnQueue sentinel)
    */
-  private buildSpawnQueue(wave: number): EnemyType[] {
+  private buildSpawnQueue(wave: number, waveType: WaveType = 'normal'): EnemyType[] {
     let budget = WAVES.BASE_BUDGET + Math.round(wave * WAVES.BUDGET_GROWTH);
     const eliteChance = wave < WAVES.ELITE_MIN_WAVE
       ? 0
@@ -177,10 +235,42 @@ export class SpawnDirector {
     const pool = this.availablePool(wave);
     const queue: EnemyType[] = [];
 
+    if (waveType === 'swarm') {
+      // §B swarm: ×4 count, only low-hp enemies, spawn from all sides rapidly
+      const swarmPool = ENEMIES.filter(e => e.hp <= WAVES.SWARM_HP_THRESHOLD && pool.includes(e.id as EnemyType));
+      const basePool: EnemyType[] = swarmPool.length > 0 ? swarmPool.map(e => e.id as EnemyType) : pool;
+      const count = budget * WAVES.SWARM_COUNT_MULT;
+      for (let i = 0; i < count; i++) {
+        queue.push(basePool[Math.floor(Math.random() * basePool.length)]);
+      }
+      return queue; // no shuffle needed — all same pool; spawn timer uses SPAWN_INTERVAL_MIN
+    }
+
+    if (waveType === 'elite_only') {
+      // §B elite_only: reduced budget, only elites
+      budget = Math.max(1, Math.round(budget * WAVES.ELITE_ONLY_BUDGET_MULT));
+      const ep = this.elitePool(wave);
+      while (budget >= WAVES.ELITE_COST) {
+        queue.push(ep[Math.floor(Math.random() * ep.length)]);
+        budget -= WAVES.ELITE_COST;
+      }
+      return queue;
+    }
+
+    if (waveType === 'bonus') {
+      // §B bonus: same count as normal budget (1pt each), use BONUS_SENTINEL to flag
+      // Spawn via normal pool — EnemySystem.spawnBonus marks them on spawn
+      while (budget > 0) {
+        queue.push(pool[Math.floor(Math.random() * pool.length)]);
+        budget -= 1;
+      }
+      return queue;
+    }
+
+    // normal (default)
     while (budget > 0) {
       const tryElite = budget >= WAVES.ELITE_COST && Math.random() < eliteChance;
       if (tryElite) {
-        // Pick an elite type — use last 3 types in the wave table (tougher ones)
         const elitePool = this.elitePool(wave);
         queue.push(elitePool[Math.floor(Math.random() * elitePool.length)]);
         budget -= WAVES.ELITE_COST;
@@ -233,8 +323,39 @@ export class SpawnDirector {
 
   private getEdgeSpawnPos(): { x: number; y: number } {
     const m = SPAWN.EDGE_MARGIN;
-    const W = GAME.WIDTH;
-    const H = GAME.HEIGHT;
+
+    if (this.viewportProvider) {
+      // Spawn just outside the camera's current viewport, clamped inside the map.
+      const view = this.viewportProvider();
+      const side = Math.floor(Math.random() * 4);
+      let x: number, y: number;
+      switch (side) {
+        case 0: // top
+          x = view.left + Math.random() * view.width;
+          y = view.top - m;
+          break;
+        case 1: // bottom
+          x = view.left + Math.random() * view.width;
+          y = view.bottom + m;
+          break;
+        case 2: // left
+          x = view.left - m;
+          y = view.top + Math.random() * view.height;
+          break;
+        default: // right
+          x = view.right + m;
+          y = view.top + Math.random() * view.height;
+          break;
+      }
+      return {
+        x: Phaser.Math.Clamp(x, 0, MAP.WIDTH),
+        y: Phaser.Math.Clamp(y, 0, MAP.HEIGHT),
+      };
+    }
+
+    // Fallback: legacy screen-edge spawn (no camera provider set)
+    const W = MAP.WIDTH;
+    const H = MAP.HEIGHT;
     const side = Math.floor(Math.random() * 4);
     switch (side) {
       case 0: return { x: Math.random() * W, y: -m };

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PICKUPS, GAME } from '@/config/game.config';
+import { PICKUPS, MAP, ITEMS_E1 } from '@/config/game.config';
 import type { RunContext } from './RunContext';
 import { Pickup } from '@/entities/Pickup';
 import type { PickupKind } from '@/entities/Pickup';
@@ -21,7 +21,8 @@ export class PickupSystem {
   private monedaTimer = 0;
 
   // Callbacks injected by GameScene for item/upgrade pickups
-  private onItemDrop: (() => void) | null = null;
+  private onItemPick: (() => string | null) | null = null;  // pre-roll del ítem al soltar el cofre
+  private onItemDrop: ((id: string | null) => void) | null = null;  // otorgar el ítem (id pre-elegido) al recoger
   private onUpgradeDrop: (() => void) | null = null;
 
   constructor(scene: Phaser.Scene, ctx: RunContext, player: Player) {
@@ -32,9 +33,11 @@ export class PickupSystem {
 
   /** Called by GameScene to wire up item/upgrade drop callbacks. */
   setDropCallbacks(
-    onItemDrop: () => void,
+    onItemPick: () => string | null,
+    onItemDrop: (id: string | null) => void,
     onUpgradeDrop: () => void,
   ): void {
+    this.onItemPick = onItemPick;
     this.onItemDrop = onItemDrop;
     this.onUpgradeDrop = onUpgradeDrop;
   }
@@ -65,6 +68,25 @@ export class PickupSystem {
 
   update(delta: number): void {
     const dtS = delta / 1000;
+
+    // §E1 iman_de_monedas: move moneda pickups toward the player — nuevo (fase E1)
+    if (this.ctx.player.items.includes('iman_de_monedas')) {
+      const px = this.player.x;
+      const py = this.player.y;
+      this.pickupPool.getChildren().forEach(go => {
+        const pickup = go as import('@/entities/Pickup').Pickup;
+        if (!pickup.active || pickup.kind !== 'moneda') return;
+        const dist = Phaser.Math.Distance.Between(pickup.x, pickup.y, px, py);
+        if (dist <= 0 || dist > ITEMS_E1.IMAN_ATTRACT_RANGE) return;
+        const step = Math.min(dist, ITEMS_E1.IMAN_ATTRACT_SPEED * dtS);
+        const angle = Phaser.Math.Angle.Between(pickup.x, pickup.y, px, py);
+        const nx = pickup.x + Math.cos(angle) * step;
+        const ny = pickup.y + Math.sin(angle) * step;
+        pickup.setPosition(nx, ny);
+        const body = pickup.body as Phaser.Physics.Arcade.StaticBody;
+        body.reset(nx, ny);
+      });
+    }
 
     // Café interval (halved if cafeteria_vip owned)
     const cafeInterval = this.ctx.player.items.includes('cafeteria_vip')
@@ -111,14 +133,23 @@ export class PickupSystem {
       if (p) p.spawn(x, y, 'upgrade');
     } else if (r < (PICKUPS.UPGRADE_DROP_CHANCE + PICKUPS.ITEM_DROP_CHANCE) * mult) {
       const p = this.pickupPool.get(x, y) as Pickup | null;
-      if (p) p.spawn(x, y, 'item');
+      // Pre-elegir el ítem para mostrar su icono real en el cofre del mapa.
+      const itemId = this.onItemPick ? this.onItemPick() : null;
+      if (p) p.spawn(x, y, 'item', itemId);
     }
   }
 
-  private spawnPickup(kind: PickupKind): void {
+  /** Posición de spawn cerca del jugador, dentro del mapa (no en la esquina de pantalla). */
+  private mapSpawnPos(): { x: number; y: number } {
     const m = PICKUPS.SPAWN_MARGIN;
-    const x = Phaser.Math.Between(m, GAME.WIDTH - m);
-    const y = Phaser.Math.Between(m, GAME.HEIGHT - m);
+    const spread = 360;
+    const x = Phaser.Math.Clamp(this.player.x + Phaser.Math.Between(-spread, spread), m, MAP.WIDTH - m);
+    const y = Phaser.Math.Clamp(this.player.y + Phaser.Math.Between(-spread, spread), m, MAP.HEIGHT - m);
+    return { x, y };
+  }
+
+  private spawnPickup(kind: PickupKind): void {
+    const { x, y } = this.mapSpawnPos();
     const p = this.pickupPool.get(x, y) as Pickup | null;
     if (!p) return;
     p.spawn(x, y, kind);
@@ -131,7 +162,9 @@ export class PickupSystem {
     let coins = 0;
     switch (pickup.kind) {
       case 'cafe': {
-        this.ctx.player.stress = Math.max(0, this.ctx.player.stress - PICKUPS.CAFE_STRESS);
+        // §E1 taza_grande: café stress reduction ×1.5 — nuevo (fase E1)
+        const cafeMult = this.ctx.player.items.includes('taza_grande') ? ITEMS_E1.TAZA_GRANDE_CAFE_MULT : 1;
+        this.ctx.player.stress = Math.max(0, this.ctx.player.stress - PICKUPS.CAFE_STRESS * cafeMult);
         // cafeteria_vip: café also heals +CAFE_VIP_BONUS_HP
         if (this.ctx.player.items.includes('cafeteria_vip')) {
           this.ctx.player.hp = Math.min(this.ctx.player.maxHp, this.ctx.player.hp + PICKUPS.CAFE_VIP_BONUS_HP);
@@ -155,10 +188,11 @@ export class PickupSystem {
         break;
       }
       case 'item': {
-        // §7.4 — grants a random eligible item (like the shop, free)
+        // §7.4 — otorga el ítem pre-elegido (el que mostraba su icono); si no hubo, elige al recoger.
+        const grantedId = pickup.itemId;
         pickup.deactivate();
         this.ctx.bus.emit('pickup:collected', { kind: 'item', coins: 0 });
-        if (this.onItemDrop) this.onItemDrop();
+        if (this.onItemDrop) this.onItemDrop(grantedId);
         return;
       }
       case 'upgrade': {

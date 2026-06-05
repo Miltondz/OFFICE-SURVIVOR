@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
 import { ENTITY_SIZES, COLORS_GAME } from '@/config/game.config';
 import { PICKUP_SPRITES } from '@/config/projectiles.config';
+import { iconKey } from '@/config/icons.config';
+
+const ITEM_ICON_DISPLAY = 26;   // tamaño en pantalla del icono del ítem en el cofre del mapa
 
 export type PickupKind = 'cafe' | 'galleta' | 'moneda' | 'stress' | 'item' | 'upgrade';
 
@@ -19,6 +22,7 @@ const KIND_COLORS: Record<PickupKind, number> = {
  */
 export class Pickup extends Phaser.GameObjects.Rectangle {
   kind: PickupKind = 'cafe';
+  itemId: string | null = null;   // §item-drop: id del ítem pre-elegido (cofre 'item')
   private sprite: Phaser.GameObjects.Sprite | null = null;
 
   constructor(scene: Phaser.Scene) {
@@ -28,23 +32,30 @@ export class Pickup extends Phaser.GameObjects.Rectangle {
     this.setActive(false).setVisible(false);
   }
 
-  spawn(x: number, y: number, kind: PickupKind): void {
+  spawn(x: number, y: number, kind: PickupKind, itemId: string | null = null): void {
     this.kind = kind;
+    this.itemId = itemId;
     this.setPosition(x, y).setActive(true);
     const body = this.body as Phaser.Physics.Arcade.StaticBody;
     body.reset(x, y);
 
-    // Sprite si la textura `pickup_<kind>` existe; si no, rect de color.
+    // Cofre 'item' con ítem pre-elegido → mostrar el icono real del ítem (item_<id>).
+    const itemTex = kind === 'item' && itemId ? iconKey(itemId) : null;
     const cfg = PICKUP_SPRITES[kind];
     const texKey = `pickup_${kind}`;
-    const hasSprite = !!cfg && this.scene.textures.exists(texKey);
-    if (hasSprite && cfg) {
-      if (this.sprite === null) {
-        this.sprite = this.scene.add.sprite(x, y, texKey).setDepth(1);
-      }
+
+    if (itemTex && this.scene.textures.exists(itemTex)) {
+      if (this.sprite === null) this.sprite = this.scene.add.sprite(x, y, itemTex).setDepth(1);
+      const tex = this.scene.textures.get(itemTex).getSourceImage();
+      const scale = ITEM_ICON_DISPLAY / Math.max(tex.width, tex.height);
+      this.sprite.setTexture(itemTex).setPosition(x, y).setScale(scale).clearTint().setActive(true).setVisible(true);
+      this.setVisible(false);
+    } else if (cfg && this.scene.textures.exists(texKey)) {
+      // Sprite genérico del pickup (moneda/café/galleta/stress).
+      if (this.sprite === null) this.sprite = this.scene.add.sprite(x, y, texKey).setDepth(1);
       const tex = this.scene.textures.get(texKey).getSourceImage();
       const scale = cfg.display / Math.max(tex.width, tex.height);
-      this.sprite.setTexture(texKey).setPosition(x, y).setScale(scale).setActive(true).setVisible(true);
+      this.sprite.setTexture(texKey).setPosition(x, y).setScale(scale).clearTint().setActive(true).setVisible(true);
       this.setVisible(false);
     } else {
       this.setFillStyle(KIND_COLORS[kind]);

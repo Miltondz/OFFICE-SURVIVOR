@@ -32,24 +32,55 @@ export const STRESS = {
   AURIC_NC_MULT: 0.85,              // auriculares_nc: stress rises 15% slower
 } as const;
 
+export type WaveType = 'normal' | 'swarm' | 'elite_only' | 'bonus' | 'miniboss' | 'boss';
+
 export const WAVES = {
   INTERVAL_S: 30,
-  BASE_ENEMIES: 2,
-  ENEMIES_PER_WAVE_MULTIPLIER: 2.5, // era 3 — escala demasiado rápido; con per-wave upgrades el jugador se fortalece pero las hordas crecían cuadráticamente (balance v1)
-  BOSS_WAVE: 10,
+  BASE_ENEMIES: 5,          // era 2 — spec expansión; oleadas con más personalidad (fase B)
+  ENEMIES_PER_WAVE_MULTIPLIER: 3, // era 2.5 — spec expansión (fase B)
+  BOSS_WAVE: 13,            // era 10 — run de 13 oleadas con minibosses intermedios (fase B)
   // §7.5 budget-based spawn system
-  BASE_BUDGET: 8,          // spawn points at wave 0
-  BUDGET_GROWTH: 5,        // +pts per wave
-  ELITE_COST: 3,           // points cost for an elite spawn
+  BASE_BUDGET: 4,           // era 8 — W1 demasiado larga; pocas oleadas tempranas (balance B2)
+  BUDGET_GROWTH: 3,         // era 5 — crecimiento más suave para pacing gradual (balance B2)
+  ELITE_COST: 3,            // points cost for an elite spawn
   ELITE_CHANCE_BASE: 0.0,
   ELITE_CHANCE_PER_WAVE: 0.06,
   ELITE_CHANCE_MAX: 0.5,
-  ELITE_MIN_WAVE: 3,       // elites appear from wave 3
+  ELITE_MIN_WAVE: 3,        // elites appear from wave 3
   SPEED_SCALE_PER_WAVE: 0.05,
-  SPEED_SCALE_MAX: 0.5,    // capped at +50% speed
-  SPAWN_INTERVAL_BASE: 0.5,
+  SPEED_SCALE_MAX: 0.5,     // capped at +50% speed
+  SPAWN_INTERVAL_BASE: 0.35, // era 0.5 — más rápido para acortar oleadas tempranas (balance B2)
   SPAWN_INTERVAL_MIN: 0.18,
-  INTERMISSION_S: 4,       // countdown seconds before next wave
+  INTERMISSION_S: 4,        // countdown seconds before next wave
+  // §B — secuencia de tipos de oleada (1..13)
+  WAVE_SEQUENCE: {
+    1: 'normal',
+    2: 'swarm',
+    3: 'normal',
+    4: 'bonus',
+    5: 'miniboss',
+    6: 'normal',
+    7: 'elite_only',
+    8: 'swarm',
+    9: 'miniboss',
+    10: 'normal',
+    11: 'elite_only',
+    12: 'miniboss',
+    13: 'boss',
+  } as Record<number, WaveType>,
+  // §B — miniboss ids por oleada (placeholder hasta Fase C)
+  WAVE_MINIBOSS: {
+    5: 'supervisor',
+    9: 'printer_industrial',
+    12: 'committee',
+  } as Record<number, string>,
+  // §B — swarm: cantidad × este factor, solo enemigos hp ≤ SWARM_HP_THRESHOLD
+  SWARM_COUNT_MULT: 4,
+  SWARM_HP_THRESHOLD: 30,   // only enemies with hp ≤ this qualify for swarm waves
+  // §B — bonus: auto-despawn after this many seconds
+  BONUS_DESPAWN_S: 20,
+  // §B — elite_only: budget fraction (reduced count)
+  ELITE_ONLY_BUDGET_MULT: 0.6,
 } as const;
 
 export const PROGRESSION = {
@@ -57,9 +88,9 @@ export const PROGRESSION = {
   XP_PER_HP_DIVISOR: 10,        // HP_enemigo / 10
   UPGRADE_OPTIONS: 3,
   // §7.6 super-linear XP curve
-  XP_BASE: 26,           // xpToNext = round(XP_BASE * level^XP_EXP)
-  XP_EXP: 1.45,
-  XP_KILL_MULT: 2,       // multiplier on base xpValue from enemy def
+  XP_BASE: 40,           // era 26 — W1 daba 3–4 niveles; con XP_BASE más alto el nivel 1 cuesta más (balance B2)
+  XP_EXP: 1.55,          // era 1.45 — curva más pronunciada para frenar niveles tempranos (balance B2)
+  XP_KILL_MULT: 1,       // era 2 — multiplicador reducido: cada kill da menos XP en oleadas tempranas (balance B2)
 } as const;
 
 export const ECONOMY = {
@@ -71,7 +102,7 @@ export const ECONOMY = {
   BACKUP_PLAN_CHANCE: 0.25,         // backup_plan: chance to grant bonus item on elite kill
 } as const;
 
-export const RUN_DURATION_S = 600; // 10 minutos
+export const RUN_DURATION_S = 840; // era 600 — run de 14 min para cubrir 13 oleadas (fase B)
 
 export const SCENES = {
   BOOT: 'BootScene',
@@ -88,13 +119,18 @@ export const SCENES = {
 } as const;
 
 export const SHOP = {
-  PRICE_COMMON: 20,
-  PRICE_RARE: 45,
-  PRICE_EPIC: 80,
-  PRICE_LEGENDARY: 140,
-  PRICE_WEAPON_LEVELUP: 20,   // same as common — costs PRICE_COMMON to level up existing weapon
-  REROLL_COST: 15,
-  CARD_COUNT: 4,
+  CARD_COUNT: 3,                  // era 4 — menos cards → cada elección importa más (fase D)
+  REROLL_BASE_COST: 5,            // era REROLL_COST 15 plano — reroll escalable (fase D)
+  REROLL_COST_INCREMENT: 5,       // coste sube 5 por cada reroll en la misma tienda
+  SELL_REFUND_RATIO: 0.5,         // reembolso al vender un ítem pasivo
+  MAX_SELLS_PER_SHOP: 1,          // máx ventas por visita
+  TIMER_SECONDS: 20,              // 20s antes de cerrar tienda automáticamente
+  LEGENDARY_CHANCE: 0.2,          // probabilidad de slot legendario extra (wave ≥ LEGENDARY_MIN_WAVE)
+  LEGENDARY_MIN_WAVE: 5,          // desde qué oleada puede aparecer el slot legendario
+  LEGENDARY_COST: 150,            // precio fijo del slot legendario (no escala con oleada)
+  PRICE_WAVE_SCALE: 0.06,         // precio sube 6% por oleada completada
+  PRICES: { common: 10, rare: 25, epic: 60, legendary: 150 } as Record<string, number>,
+  PRICE_WEAPON_LEVELUP: 10,       // era 20 — coste de subir nivel de arma existente (fase D)
 } as const;
 
 export const BUILD_REPORT = {
@@ -123,8 +159,14 @@ export const WAVE_EVENTS = {
 } as const;
 
 export const MAP = {
-  OBSTACLE_COUNT_MIN: 8,
-  OBSTACLE_COUNT_MAX: 12,
+  WIDTH: 2880,
+  HEIGHT: 1620,
+  PLAYER_SPAWN_X: 1440,
+  PLAYER_SPAWN_Y: 810,
+  OBSTACLE_COUNT_MIN: 25,           // era 8 — mapa 3× más grande requiere más obstáculos para cobertura (expansión mapa)
+  OBSTACLE_COUNT_MAX: 35,           // era 12 — idem (expansión mapa)
+  OBSTACLE_GRID_CELL: 96,           // máx 1 obstáculo por celda de 96px
+  SPAWN_FREE_RADIUS: 200,           // zona libre alrededor del spawn del jugador
   CENTER_EXCLUSION: 130,            // keep obstacles away from player spawn (center)
   COFFEE_MACHINE_INTERVAL_S: 45,
   VENDING_COST: 15,
@@ -169,6 +211,7 @@ export const COLORS = {
 export const COMBAT = {
   PROJECTILE_POOL_SIZE: 200,
   ENEMY_POOL_SIZE: 300,
+  MAX_PASSIVE_ITEMS: 6,           // tope de ítems pasivos equipados; consumables/weapons no cuentan (fase D.3)
   PROJECTILE_DEFAULT_SPEED: 360,    // px/s for standard bullets
   PROJECTILE_LIFESPAN_MS: 2000,
   CRIT_CHANCE: 0.20,                // base
@@ -194,6 +237,11 @@ export const SPAWN = {
   PRINTER_FAN_COUNT: 5,
   PRINTER_FAN_SPREAD_DEG: 72,
   BADGE_DETECTION_DELAY_MS: 500,    // badge: enemies detect player 0.5s late
+  // cleaning_lady: rastro de piso pulido (zona eléctrica que daña al jugador)
+  POLISH_INTERVAL_MS: 1200,         // deja una zona cada 1.2s mientras se mueve
+  POLISH_RADIUS: 26,
+  POLISH_DPS: 6,
+  POLISH_DURATION_MS: 4000,
 } as const;
 
 export const BOSS = {
@@ -321,6 +369,70 @@ export const AUDIO = {
   },
 } as const;
 
+// ─── §C — Jefes Menores ──────────────────────────────────────────────────────
+export const MINIBOSS = {
+  DRIFT_SPEED: 70,   // px/s slow drift toward player (like CEO)
+  CONTACT_RANGE: 44, // px distance for contact damage check
+
+  SUPERVISOR: {
+    HP: 600,
+    SIZE: 80,
+    CONTACT_DAMAGE: 18,
+    COLOR: 0xdd6600,          // orange – distinct from CEO red
+    // Attack cooldowns (ms)
+    SONIC_CD: 3000,           // Grito Sónico — push 120px
+    KICK_CD: 5000,            // Patada — dash + knockback
+    REUNION_CD: 8000,         // ¡Reunión! — summon 4 angry_email
+    MEGA_CD: 6000,            // Megáfono Total (fase 2) — shockwave w/ center gap
+    PHASE2_HP_FRAC: 0.50,     // enter phase 2 below 50% HP
+    SONIC_PUSH: 120,          // px knockback from sonic scream
+    KICK_SPEED: 450,          // px/s dash speed
+    KICK_DURATION_MS: 350,    // how long the dash lasts
+    MEGA_INNER_R: 80,         // gap radius in megaphone shockwave
+    MEGA_OUTER_R: 220,
+    MEGA_DAMAGE: 28,
+    DROP_COINS: 40,
+    DROP_RARITY: 'rare' as const,
+  },
+
+  PRINTER_INDUSTRIAL: {
+    HP: 900,
+    SIZE: 96,
+    CONTACT_DAMAGE: 22,
+    COLOR: 0x9933cc,          // purple placeholder tint on possessed_printer
+    PHASE2_HP_FRAC: 0.40,
+    // Attack cooldowns (ms)
+    TORNADO_CD: 5000,         // 8 papeles girando
+    INK_CD: 4000,             // arco de proyectiles + mancha de tinta DamageZone
+    WALL_CD: 7000,            // línea de proyectiles con gap 80px
+    PAPER_CD: 1500,           // Papel Infinito (fase 2) — 8 dirs
+    INK_ZONE_R: 40,
+    INK_ZONE_DPS: 5,
+    INK_ZONE_DUR_MS: 5000,
+    WALL_GAP_PX: 80,          // gap in the paper wall
+    WALL_PROJ_COUNT: 10,
+    TORNADO_COUNT: 8,
+    DROP_COINS: 60,
+    DROP_RARITY: 'epic' as const,
+  },
+
+  COMMITTEE: {
+    HP_TOTAL: 900,            // shared HP across 3 members
+    HP_EACH: 300,
+    SIZE: 56,
+    CONTACT_DAMAGE: 14,
+    COLORS: [0x111111, 0x888888, 0xdddddd] as const,  // tints for each member
+    ENRAGE_DMG_MULT: 1.30,    // +30% damage when a member dies
+    ENRAGE_SPD_MULT: 1.20,    // +20% speed when a member dies
+    CHARGE_CD: 10000,         // coordinated charge every 10s
+    CHARGE_SPEED: 500,
+    CHARGE_DURATION_MS: 400,
+    DROP_COINS: 80,
+    DROP_RARITY: 'epic' as const,
+    SPREAD: 90,               // px spread between members on spawn
+  },
+} as const;
+
 // META_UPGRADE_DISPLAY removed in Phase 4 — use META_UPGRADES from meta.config.ts (single source of truth)
 
 export const PICKUPS = {
@@ -338,4 +450,41 @@ export const PICKUPS = {
   ITEM_DROP_CHANCE: 0.04,          // probability on normal enemy death
   ITEM_DROP_ELITE_MULT: 3,         // élite ×3 chance
   UPGRADE_DROP_CHANCE: 0.015,      // upgrade star drop chance
+} as const;
+
+// ─── §E1 — Nuevos ítems (fase E1) ────────────────────────────────────────────
+export const ITEMS_E1 = {
+  // triple_espresso: velocidad +25% por 8s al recoger cualquier pickup — nuevo (fase E1)
+  ESPRESSO_SPEED_MULT: 1.25,        // nuevo (fase E1)
+  ESPRESSO_DURATION_MS: 8000,       // nuevo (fase E1)
+  // taza_grande: +20 HP máx; café ×1.5 efecto — nuevo (fase E1)
+  TAZA_GRANDE_MAX_HP: 20,           // nuevo (fase E1)
+  TAZA_GRANDE_CAFE_MULT: 1.5,       // multiplicador del efecto del café — nuevo (fase E1)
+  // sello_de_goma: cada 5 kills, siguiente proyectil ×3 daño — nuevo (fase E1)
+  SELLO_KILL_THRESHOLD: 5,          // nuevo (fase E1)
+  SELLO_DAMAGE_MULT: 3,             // nuevo (fase E1)
+  // pelota_stress: 30% de anular daño — nuevo (fase E1)
+  PELOTA_BLOCK_CHANCE: 0.30,        // nuevo (fase E1)
+  // combustible_rage: +5% daño 10s por hit, stack ×3 — nuevo (fase E1)
+  RAGE_STACK_DAMAGE: 0.05,          // nuevo (fase E1)
+  RAGE_DURATION_MS: 10000,          // nuevo (fase E1)
+  RAGE_MAX_STACKS: 3,               // nuevo (fase E1)
+  // iman_de_monedas: radio ×4 + atracción — nuevo (fase E1)
+  IMAN_PICKUP_RANGE_MULT: 4,        // multiplier sobre pickupRange base — nuevo (fase E1)
+  IMAN_ATTRACT_SPEED: 200,          // px/s que se acercan las monedas — nuevo (fase E1)
+  IMAN_ATTRACT_RANGE: 300,          // radio de atracción px — nuevo (fase E1)
+  // doble_disparo: 25% de disparar 2 — nuevo (fase E1)
+  DOBLE_DISPARO_CHANCE: 0.25,       // nuevo (fase E1)
+  // cadena_de_kills: +2% daño acumulativo por kill sin daño — nuevo (fase E1)
+  CADENA_DAMAGE_PER_KILL: 0.02,     // nuevo (fase E1)
+  // explosion_al_matar: AoE 150px por 50% HP élite — nuevo (fase E1)
+  EXPLOSION_RADIUS: 150,            // nuevo (fase E1)
+  EXPLOSION_DAMAGE_FRAC: 0.50,      // fracción del HP del élite como daño AoE — nuevo (fase E1)
+  // modo_dios_temporal: cada 60s, 3s invencible + ×5 daño — nuevo (fase E1)
+  MODO_DIOS_INTERVAL_MS: 60000,     // nuevo (fase E1)
+  MODO_DIOS_DURATION_MS: 3000,      // nuevo (fase E1)
+  MODO_DIOS_DAMAGE_MULT: 5,         // nuevo (fase E1)
+  // ultimo_cartucho: ≤20% HP → cadencia ×3 — nuevo (fase E1)
+  ULTIMO_HP_THRESHOLD: 0.20,        // nuevo (fase E1)
+  ULTIMO_FIRERATE_MULT: 3,          // nuevo (fase E1)
 } as const;

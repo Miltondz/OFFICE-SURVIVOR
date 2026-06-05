@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SCENES, GAME, SPAWN, BOSS, FEEL, CURSES } from '@/config/game.config';
+import { SCENES, GAME, MAP, SPAWN, BOSS, FEEL, CURSES, MINIBOSS } from '@/config/game.config';
 import { SceneManager } from '@/systems/SceneManager';
 import { EventBus } from '@/systems/EventBus';
 import { createRunContext, recomputeModifiers, applyCharacter } from '@/systems/RunContext';
@@ -17,6 +17,8 @@ import { MapSystem } from '@/systems/MapSystem';
 import { PickupSystem } from '@/systems/PickupSystem';
 import { UpgradePool } from '@/systems/UpgradePool';
 import { CEOBoss } from '@/entities/CEOBoss';
+import type { MiniBoss } from '@/entities/MiniBoss';
+import { SupervisorBoss, PrinterIndustrialBoss, CommitteeBoss } from '@/entities/MiniBoss';
 import { DamageZone } from '@/entities/DamageZone';
 import { Projectile } from '@/entities/Projectile';
 import { installItemReactions, setItemReactionDeps, applyItemPickup } from '@/systems/ItemReactions';
@@ -44,6 +46,7 @@ export class GameScene extends Phaser.Scene {
   private pickupSys!: PickupSystem;
   private upgradePool!: UpgradePool;
   private boss: CEOBoss | null = null;
+  private miniboss: MiniBoss | null = null;
 
   private zonePool!: Phaser.GameObjects.Group;
   private enemyProjPool!: Phaser.GameObjects.Group;
@@ -91,6 +94,7 @@ export class GameScene extends Phaser.Scene {
     this.victory = false;
     this.ipoActive = false;
     this.boss = null;
+    this.miniboss = null;
     this.vignetteTween = null;
     this.regenAccum = 0;
 
@@ -104,10 +108,8 @@ export class GameScene extends Phaser.Scene {
       applyMetaUpgrades(this.ctx, saveForMeta);
     }
 
-    // Background
-    const cx = GAME.WIDTH / 2;
-    const cy = GAME.HEIGHT / 2;
-    this.add.image(cx, cy, 'bg_floor').setDisplaySize(GAME.WIDTH, GAME.HEIGHT).setDepth(-10);
+    // Background — tileSprite cubre todo el mapa (no estirado a pantalla como antes)
+    this.add.tileSprite(0, 0, MAP.WIDTH, MAP.HEIGHT, 'bg_floor').setOrigin(0, 0).setDepth(-10);
 
     // Pools
     this.zonePool = this.add.group({
@@ -139,19 +141,35 @@ export class GameScene extends Phaser.Scene {
 
     this.pickupSys = new PickupSystem(this, this.ctx, this.player);
     this.pickupSys.setDropCallbacks(
-      () => this.grantFreeItem(),
+      () => this.pickEligibleItemId(),
+      (id) => this.grantSpecificItem(id),
       () => this.grantDropUpgrade(),
     );
     this.pickupSys.init();
 
     this.upgradePool = new UpgradePool();
 
-    setItemReactionDeps(this.pickupSys, this.weaponSys, this.upgradePool);
+    setItemReactionDeps(this.pickupSys, this.weaponSys, this.upgradePool, this.enemySys, this);
 
     this.waveEvents = new WaveEventSystem(this, this.ctx, this.enemySys, this.pickupSys, this.spawnDir, this.player);
 
     this.mapSys = new MapSystem(this, this.ctx, this.player, this.enemySys, this.weaponSys, this.pickupSys, this.upgradePool);
     this.mapSys.init();
+
+    // Mapa expandido: world bounds + cámara con follow suave
+    this.physics.world.setBounds(0, 0, MAP.WIDTH, MAP.HEIGHT);
+    this.cameras.main.setBounds(0, 0, MAP.WIDTH, MAP.HEIGHT);
+    this.cameras.main.startFollow(this.player.body, true, 0.1, 0.1);
+
+    // Inyectar el viewport de cámara al SpawnDirector para spawns off-screen
+    this.spawnDir.setViewportProvider(() => this.cameras.main.worldView);
+
+    // Apuntado de armas al jefe/miniboss (no están en enemyPool).
+    this.weaponSys.setBossTargetProvider(() => {
+      if (this.miniboss?.alive) return { x: this.miniboss.body.x, y: this.miniboss.body.y };
+      if (this.boss?.alive) return { x: this.boss.body.x, y: this.boss.body.y };
+      return null;
+    });
 
     // Starting weapon pick
     this.levelSys.grantUpgrade(true);
@@ -179,6 +197,17 @@ export class GameScene extends Phaser.Scene {
     this.ctx.bus.on('player:died', () => this.handlePlayerDied());
     this.ctx.bus.on('boss:spawned', () => this.spawnBoss());
     this.ctx.bus.on('boss:defeated', () => this.handleBossDefeated());
+
+    // §C — miniboss wiring
+    this.ctx.bus.on('miniboss:spawn', (p: { id: string }) => this.spawnMiniboss(p.id));
+    // §C — ink zone spawning from PrinterIndustrialBoss
+    this.ctx.bus.on('miniboss:spawnZone', (p: { x: number; y: number; radius: number; dps: number; durationMs: number; color: number }) => {
+      const z = this.zonePool.get(p.x, p.y) as import('@/entities/DamageZone').DamageZone | null;
+      if (z) {
+        z.spawn(p.x, p.y, p.radius, p.dps, p.durationMs);
+        z.setFillStyle(p.color, 0.6);
+      }
+    });
 
     this.ctx.bus.on('wave:start', (p: { wave: number }) => {
       void p; // wave display handled by HUDScene
@@ -347,6 +376,29 @@ export class GameScene extends Phaser.Scene {
       this.ctx.bus.emit('boss:hp', { ratio });
     }
 
+    // §C — miniboss update + contact damage
+    if (this.miniboss?.alive) {
+      this.miniboss.update(_time, delta);
+
+      if (this.miniboss instanceof CommitteeBoss) {
+        // Committee: check per-member contact
+        for (const { body, damage } of this.miniboss.getAliveMemberBodies()) {
+          const dist = Phaser.Math.Distance.Between(body.x, body.y, this.player.x, this.player.y);
+          if (dist < MINIBOSS.COMMITTEE.SIZE / 2 + 16) {
+            this.player.takeDamage(damage);
+          }
+        }
+      } else {
+        const dist = Phaser.Math.Distance.Between(
+          this.miniboss.body.x, this.miniboss.body.y,
+          this.player.x, this.player.y,
+        );
+        if (dist < MINIBOSS.CONTACT_RANGE) {
+          this.player.takeDamage(this.minibossContactDamage());
+        }
+      }
+    }
+
     if (this.ctx.player.items.includes('yolo') && this.ctx.player.stress < 90) {
       this.ctx.player.stress = 90;
     }
@@ -400,13 +452,15 @@ export class GameScene extends Phaser.Scene {
         // shop:closed event will call spawnDir.notifyIntermissionDone()
       },
     });
-    this.scene.pause();
+    // Solo pausar si la escena sigue corriendo (evita "Cannot pause non-running Scene").
+    if (this.scene.isActive()) this.scene.pause();
   }
 
   // ─── §7.4 Map drop callbacks ──────────────────────────────────────────────
 
   /** Grant a random eligible passive item (free, like shop). */
-  private grantFreeItem(): void {
+  /** Elige (sin aplicar) un id de ítem elegible y ponderado por rareza, o null. */
+  private pickEligibleItemId(): string | null {
     const level = this.ctx.player.level;
     const pool = ITEMS.filter(item => {
       if (item.category === 'consumable') return false;
@@ -415,9 +469,8 @@ export class GameScene extends Phaser.Scene {
       if (item.rarity === 'legendary' && level < RARITY_RULES.LEGENDARY_MIN_LEVEL) return false;
       return true;
     });
-    if (pool.length === 0) return;
+    if (pool.length === 0) return null;
 
-    // Weighted pick
     const totalW = pool.reduce((s, i) => s + RARITY_WEIGHTS[i.rarity], 0);
     let rand = Math.random() * totalW;
     let picked = pool[pool.length - 1];
@@ -425,7 +478,16 @@ export class GameScene extends Phaser.Scene {
       rand -= RARITY_WEIGHTS[item.rarity];
       if (rand <= 0) { picked = item; break; }
     }
-    applyItemPickup(this.ctx, picked);
+    return picked.id;
+  }
+
+  /** Otorga el ítem pre-elegido (id). Si es null, elige uno al momento. */
+  private grantSpecificItem(id: string | null): void {
+    const itemId = id ?? this.pickEligibleItemId();
+    if (!itemId) return;
+    const def = ITEMS.find(i => i.id === itemId);
+    if (!def) return;
+    applyItemPickup(this.ctx, def);
     recomputeModifiers(this.ctx);
     this.weaponSys.recomputeWeaponMods();
   }
@@ -494,9 +556,36 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnBoss(): void {
+    // Only spawn CEO when there is no active miniboss (boss:spawned is also emitted by miniboss init)
+    if (this.miniboss?.alive) return;
     if (this.boss) return;
     this.enemySys.killAll();
     this.boss = new CEOBoss(this, this.ctx, this.weaponSys, this.enemySys);
+  }
+
+  private spawnMiniboss(id: string): void {
+    if (this.miniboss?.alive) return;
+    this.enemySys.killAll();
+    switch (id) {
+      case 'supervisor':
+        this.miniboss = new SupervisorBoss(this, this.ctx, this.weaponSys, this.enemySys);
+        break;
+      case 'printer_industrial':
+        this.miniboss = new PrinterIndustrialBoss(this, this.ctx, this.weaponSys, this.enemySys);
+        break;
+      case 'committee':
+        this.miniboss = new CommitteeBoss(this, this.ctx, this.weaponSys, this.enemySys);
+        break;
+      default:
+        // Unknown id: skip
+        break;
+    }
+  }
+
+  private minibossContactDamage(): number {
+    if (this.miniboss instanceof SupervisorBoss) return MINIBOSS.SUPERVISOR.CONTACT_DAMAGE;
+    if (this.miniboss instanceof PrinterIndustrialBoss) return MINIBOSS.PRINTER_INDUSTRIAL.CONTACT_DAMAGE;
+    return 14;
   }
 
   private handlePlayerDied(): void {

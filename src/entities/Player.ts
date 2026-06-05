@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PLAYER, GAME, COLORS } from '@/config/game.config';
+import { PLAYER, MAP, COLORS, ITEMS_E1 } from '@/config/game.config';
 import { CHAR_SHEET, charFrame } from '@/config/characters.config';
 import type { CharDir } from '@/config/characters.config';
 import type { RunContext } from '@/systems/RunContext';
@@ -32,8 +32,8 @@ export class Player {
     this.scene = scene;
     this.ctx = ctx;
 
-    const cx = GAME.WIDTH / 2;
-    const cy = GAME.HEIGHT / 2;
+    const cx = MAP.PLAYER_SPAWN_X;
+    const cy = MAP.PLAYER_SPAWN_Y;
 
     // Cuerpo físico (rect pequeño, invisible) — todas las colisiones siguen igual.
     this.body = scene.add.rectangle(cx, cy, PLAYER_SIZE, PLAYER_SIZE, COLORS.PLAYER).setVisible(false);
@@ -77,8 +77,8 @@ export class Player {
       dx /= n; dy /= n;
     }
 
-    this.body.x = Phaser.Math.Clamp(this.body.x + dx * speed * dtS, PLAYER_SIZE / 2, GAME.WIDTH - PLAYER_SIZE / 2);
-    this.body.y = Phaser.Math.Clamp(this.body.y + dy * speed * dtS, PLAYER_SIZE / 2, GAME.HEIGHT - PLAYER_SIZE / 2);
+    this.body.x = Phaser.Math.Clamp(this.body.x + dx * speed * dtS, PLAYER_SIZE / 2, MAP.WIDTH - PLAYER_SIZE / 2);
+    this.body.y = Phaser.Math.Clamp(this.body.y + dy * speed * dtS, PLAYER_SIZE / 2, MAP.HEIGHT - PLAYER_SIZE / 2);
 
     // ---- Dirección + animación ----
     this.updateAnim(dx, dy);
@@ -125,6 +125,19 @@ export class Player {
 
   takeDamage(amount: number): void {
     if (this.iFrameTimer > 0 || this.modoAvionTimer > 0) return;
+    // §E1 modo_dios_temporal: invencibilidad — nuevo (fase E1)
+    if (this.ctx.modoDiosActive) return;
+    // §E1 escudo_grapas: absorbe el primer hit de la oleada — nuevo (fase E1)
+    if (this.ctx.escudoGrapasActive && this.ctx.player.items.includes('escudo_grapas')) {
+      this.ctx.escudoGrapasActive = false;
+      this.iFrameTimer = PLAYER.INVINCIBILITY_FRAMES_MS;
+      return; // daño bloqueado; no emite player:hit
+    }
+    // §E1 pelota_stress: 30% de anular el daño — nuevo (fase E1)
+    if (this.ctx.player.items.includes('pelota_stress') && Math.random() < ITEMS_E1.PELOTA_BLOCK_CHANCE) {
+      this.iFrameTimer = PLAYER.INVINCIBILITY_FRAMES_MS;
+      return; // daño bloqueado; no emite player:hit (evita feedback loops)
+    }
 
     const actual = Math.ceil(amount * this.ctx.modifiers.damageTakenMult);
     this.ctx.player.hp -= actual;

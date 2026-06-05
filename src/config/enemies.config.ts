@@ -13,6 +13,9 @@ export const ENEMIES: EnemyDefinition[] = [
   def({ id: 'hr_rep',            name: 'HR Representative', hp: 35,  speed: 60,  damage: 10, isElite: true  }),
   def({ id: 'possessed_printer', name: 'Possessed Printer', hp: 120, speed: 30,  damage: 15, isElite: true  }),
   def({ id: 'auditor',           name: 'Auditor',           hp: 80,  speed: 40,  damage: 20, isElite: true  }),
+  // Señora de Limpieza: lenta y resistente, empuja un carrito eléctrico de pulido que deja
+  // rastro de piso pulido (zona eléctrica que daña). No élite.
+  def({ id: 'cleaning_lady',     name: 'Señora de Limpieza', hp: 55,  speed: 42,  damage: 10, isElite: false }),
 ];
 
 export function getEnemyById(id: string): EnemyDefinition | undefined {
@@ -25,7 +28,7 @@ export function getEnemyById(id: string): EnemyDefinition | undefined {
 // Hoja 1200×896 → frame 300×298 (se ignoran 2px sobrantes de alto).
 // Filas: 0 abajo, 1 lado(derecha), 2 arriba. Columnas: 0 idle, 1-2 walk, 3 death. idx = fila*4 + col.
 export const ENEMY_SHEET_IDS = [
-  'angry_email', 'toxic_manager', 'possessed_printer', 'auditor', 'angry_client', 'hr_rep',
+  'angry_email', 'toxic_manager', 'possessed_printer', 'auditor', 'angry_client', 'hr_rep', 'cleaning_lady',
 ] as const;
 
 export const ENEMY_SHEET = {
@@ -44,6 +47,7 @@ export const ENEMY_FRAME: Record<string, { w: number; h: number }> = {
   auditor: { w: 300, h: 298 },
   hr_rep: { w: 300, h: 298 },
   angry_client: { w: 129, h: 212 },
+  cleaning_lady: { w: 210, h: 244 },
 };
 
 // Alto en pantalla por enemigo (px). Normales más chicos, élites más grandes.
@@ -54,6 +58,7 @@ export const ENEMY_DISPLAY_H: Record<string, number> = {
   auditor: 58,
   hr_rep: 50,
   angry_client: 40,
+  cleaning_lady: 50,
 };
 
 export type EnemyDir = 'down' | 'side' | 'up';

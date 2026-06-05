@@ -77,9 +77,10 @@ export class CEOBoss {
     scene.physics.add.overlap(
       _weaponSys.projectilePool,
       this.body,
-      (projGO, _bossGO) => {
-        const proj = projGO as Projectile;
-        if (!proj.active || !this.alive) return;
+      (a, b) => {
+        // El proyectil puede llegar en cualquiera de los dos args según el orden de Phaser.
+        const proj = (a instanceof Projectile ? a : b instanceof Projectile ? b : null);
+        if (!proj || !proj.active || !this.alive) return;
         this.takeDamage(proj.damage);
         proj.deactivate();
       },

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ENTITY_SIZES, COLORS_GAME, ECONOMY, FEEL, CURSES, PROGRESSION } from '@/config/game.config';
+import { ENTITY_SIZES, COLORS_GAME, ECONOMY, FEEL, CURSES, PROGRESSION, WAVES } from '@/config/game.config';
 import { ENEMY_SHEET, ENEMY_DISPLAY_H, ENEMY_FRAME } from '@/config/enemies.config';
 import type { EnemyDir } from '@/config/enemies.config';
 import type { EnemyDefinition, EnemyType } from '@/types';
@@ -21,8 +21,14 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
   contactCooldown = 0;      // per-enemy contact damage cooldown ms
   detectionDelayMs = 0;     // badge: ms remaining before enemy chases player
 
+  // §B — bonus enemy flag
+  isBonus = false;          // bonus waves: no contact damage, ×2 coins on death, auto-despawn 20s
+  private bonusTimer = 0;   // ms remaining before auto-despawn (bonus enemies only)
+
   // For possessed_printer
   fanTimer = 0;
+  // For cleaning_lady: timer del rastro de piso pulido
+  polishTimer = 0;
   lastDamageSource = '';
   ally = false;             // rrhh: HR Rep allied to player (movement driven by EnemySystem)
 
@@ -69,8 +75,11 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     this.contactCooldown = 0;
     this.detectionDelayMs = 0;
     this.fanTimer = 0;
+    this.polishTimer = 0;
     this.lastDamageSource = '';
     this.lastHpShown = -1;
+    this.isBonus = false;
+    this.bonusTimer = 0;
 
     const size = def.isElite ? ENTITY_SIZES.ELITE : ENTITY_SIZES.ENEMY;
     this.setSize(size, size).setPosition(x, y);
@@ -122,6 +131,19 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     this.hpBar.setActive(true).setVisible(true);
   }
 
+  /** Mark this enemy as a bonus enemy (dorado, sin daño, ×2 monedas, auto-despawn 20s). */
+  markAsBonus(): void {
+    this.isBonus = true;
+    this.bonusTimer = WAVES.BONUS_DESPAWN_S * 1000;
+    // Golden tint to distinguish bonus enemies visually
+    if (this.hasSheet && this.sprite) {
+      this.sprite.setTint(0xffd700);
+    } else {
+      this.setFillStyle(0xffd700);
+      this.baseColor = 0xffd700;
+    }
+  }
+
   get isActive2(): boolean { return this.active2; }
   get enemyType(): EnemyType { return this.def.id; }
 
@@ -151,6 +173,15 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     // badge: detection delay countdown
     if (this.detectionDelayMs > 0) {
       this.detectionDelayMs -= delta;
+    }
+
+    // §B bonus: auto-despawn after BONUS_DESPAWN_S seconds
+    if (this.isBonus && this.bonusTimer > 0) {
+      this.bonusTimer -= delta;
+      if (this.bonusTimer <= 0) {
+        this.deactivate();
+        return;
+      }
     }
 
     // Sprite animado sigue al cuerpo (pies en la base del rect)
@@ -287,7 +318,9 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     const coinRange = this.def.isElite
       ? { min: ECONOMY.ELITE_COINS_MIN, max: ECONOMY.ELITE_COINS_MAX }
       : { min: ECONOMY.ENEMY_COINS_MIN, max: ECONOMY.ENEMY_COINS_MAX };
-    const coins = Phaser.Math.Between(coinRange.min, coinRange.max) * this.ctx.modifiers.coinMult;
+    // §B bonus enemies: drop ×2 coins
+    const coinMult = this.isBonus ? this.ctx.modifiers.coinMult * 2 : this.ctx.modifiers.coinMult;
+    const coins = Phaser.Math.Between(coinRange.min, coinRange.max) * coinMult;
 
     this.ctx.player.xp += xp;
     this.ctx.player.coins += Math.floor(coins);
