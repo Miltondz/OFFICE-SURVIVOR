@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PLAYER, MAP, COLORS, ITEMS_E1 } from '@/config/game.config';
+import { PLAYER, MAP, COLORS, ITEMS_E1, ITEMS_E2 } from '@/config/game.config';
 import { CHAR_SHEET, charFrame } from '@/config/characters.config';
 import type { CharDir } from '@/config/characters.config';
 import type { RunContext } from '@/systems/RunContext';
@@ -62,6 +62,9 @@ export class Player {
   get x(): number { return this.body.x; }
   get y(): number { return this.body.y; }
 
+  // §E2 — cronometro_bala time-slow callback; set by GameScene — nuevo (fase E2)
+  onCronometroActivate: (() => void) | null = null;
+
   update(delta: number, stressSpeedMult: number): void {
     const dtS = delta / 1000;
     const speed = this.ctx.player.speed * stressSpeedMult;
@@ -96,6 +99,8 @@ export class Player {
 
     if (this.modoAvionTimer > 0) this.modoAvionTimer -= delta;
     if (this.modoAvionCooldown > 0) this.modoAvionCooldown -= delta;
+    // §E2 teletransporte: tick cooldown — nuevo (fase E2)
+    if (this.ctx.teleportCooldownMs > 0) this.ctx.teleportCooldownMs -= delta;
 
     // Barra de HP encima de la cabeza del sprite
     const ratio = Math.max(0, this.ctx.player.hp / this.ctx.player.maxHp);
@@ -145,7 +150,42 @@ export class Player {
     this.iFrameTimer = PLAYER.INVINCIBILITY_FRAMES_MS;
     this.ctx.bus.emit('player:hit', { amount: actual });
 
+    // §E2 teletransporte: when HP ≤ 25% after taking damage, teleport to random position — nuevo (fase E2)
+    if (this.ctx.player.items.includes('teletransporte')
+      && this.ctx.teleportCooldownMs <= 0
+      && this.ctx.player.hp > 0
+      && this.ctx.player.hp / this.ctx.player.maxHp <= ITEMS_E2.TELEPORT_HP_THRESHOLD) {
+      const margin = ITEMS_E2.TELEPORT_MARGIN;
+      const tx = margin + Math.random() * (MAP.WIDTH - margin * 2);
+      const ty = margin + Math.random() * (MAP.HEIGHT - margin * 2);
+      this.body.setPosition(tx, ty);
+      this.ctx.teleportCooldownMs = ITEMS_E2.TELEPORT_COOLDOWN_MS;
+      this.iFrameTimer = Math.max(this.iFrameTimer, 1500); // brief i-frames after teleport
+    }
+
+    // §E2 cronometro_bala: first time HP ≤ 30%, activate one-shot time slow — nuevo (fase E2)
+    if (this.ctx.player.items.includes('cronometro_bala')
+      && !this.ctx.cronometroBalaUsed
+      && this.ctx.player.hp > 0
+      && this.ctx.player.hp / this.ctx.player.maxHp <= ITEMS_E2.CRONO_HP_THRESHOLD) {
+      this.ctx.cronometroBalaUsed = true;
+      if (this.onCronometroActivate) this.onCronometroActivate();
+    }
+
     if (this.ctx.player.hp <= 0) {
+      // §E2 segundo_corazon: intercept death once — nuevo (fase E2)
+      if (this.ctx.player.items.includes('segundo_corazon') && !this.ctx.secondHeartUsed) {
+        this.ctx.secondHeartUsed = true;
+        this.ctx.player.hp = ITEMS_E2.SEGUNDO_CORAZON_HP;
+        this.ctx.secondHeartHp = ITEMS_E2.SEGUNDO_CORAZON_HP;
+        this.iFrameTimer = Math.max(this.iFrameTimer, 2000); // i-frames on revival
+        if (this.ctx.player.items.includes('modo_avion') && this.modoAvionCooldown <= 0) {
+          this.modoAvionTimer = 2000;
+          this.modoAvionCooldown = 8000;
+        }
+        return; // death cancelled
+      }
+
       this.ctx.player.hp = 0;
       // Frame de muerte de la dirección actual
       this.sprite.anims.stop();

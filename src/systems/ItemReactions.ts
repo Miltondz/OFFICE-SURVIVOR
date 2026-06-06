@@ -2,11 +2,12 @@ import Phaser from 'phaser';
 import type { RunContext } from './RunContext';
 import { recomputeModifiers } from './RunContext';
 import { ECONOMY, ITEMS_E1 } from '@/config/game.config';
+// ITEMS_E2 not needed here (no numeric constants used in reactions) — nuevo (fase E2)
 import type { ItemDefinition } from '@/types';
 
 // References injected by GameScene after instantiation
 let _pickupSystemRef: { spawnStressPickup: (x: number, y: number) => void } | null = null;
-let _weaponSystemRef: { recomputeWeaponMods: () => void } | null = null;
+let _weaponSystemRef: { recomputeWeaponMods: () => void; duplicateTopKillWeapon: () => void } | null = null;
 let _upgradePoolRef: { pick: (player: import('@/types').PlayerState, mods: import('@/types').RunModifiers, count: number, weaponLevels?: Record<string, number>, weaponsOnly?: boolean, forbidHighRarityWeapons?: boolean, forbidCommonItems?: boolean) => (import('@/types').ItemDefinition | import('@/types').WeaponDefinition)[] } | null = null;
 // §E1 — EnemySystem ref for explosion_al_matar AoE
 let _enemySystemRef: { damageInRadius: (cx: number, cy: number, radius: number, damage: number, sourceId: string) => void } | null = null;
@@ -15,7 +16,7 @@ let _sceneRef: Phaser.Scene | null = null;
 
 export function setItemReactionDeps(
   pickupSys: { spawnStressPickup: (x: number, y: number) => void },
-  weaponSys: { recomputeWeaponMods: () => void },
+  weaponSys: { recomputeWeaponMods: () => void; duplicateTopKillWeapon: () => void },
   upgradePool: { pick: (player: import('@/types').PlayerState, mods: import('@/types').RunModifiers, count: number, weaponLevels?: Record<string, number>, weaponsOnly?: boolean, forbidHighRarityWeapons?: boolean, forbidCommonItems?: boolean) => (import('@/types').ItemDefinition | import('@/types').WeaponDefinition)[] },
   enemySys?: { damageInRadius: (cx: number, cy: number, radius: number, damage: number, sourceId: string) => void },
   scene?: Phaser.Scene,
@@ -153,6 +154,23 @@ export function installItemReactions(ctx: RunContext): void {
       _startModoDiosTimer(ctx);
     } else {
       _modoDiosCtx = ctx;
+    }
+  }
+
+  // ── §E2 NUEVOS HANDLERS ──────────────────────────────────────────────────
+
+  // ---- singularidad: cuenta kills; cada 30 → activar pull — nuevo (fase E2) ----
+  if (ctx.player.items.includes('singularidad')) {
+    bus.removeListener('enemy:killed', _singularidadKillHandler);
+    bus.on('enemy:killed', _singularidadKillHandler);
+    _singularidadCtx = ctx;
+  }
+
+  // ---- fotocopiadora_armas: duplicate top-kill weapon on pickup (once per run) — nuevo (fase E2) ----
+  if (ctx.player.items.includes('fotocopiadora_armas') && !ctx.fotocopiadoraArmasUsed) {
+    if (_weaponSystemRef) {
+      ctx.fotocopiadoraArmasUsed = true;
+      _weaponSystemRef.duplicateTopKillWeapon();
     }
   }
 }
@@ -385,6 +403,18 @@ function _startModoDiosTimer(_initialCtx: RunContext): void {
       _startModoDiosTimer(_modoDiosCtx);
     });
   });
+}
+
+// ── §E2 handlers ────────────────────────────────────────────────────────────
+
+// ---- singularidad ----
+let _singularidadCtx: RunContext | null = null;
+function _singularidadKillHandler(): void {
+  if (!_singularidadCtx) return;
+  const ctx = _singularidadCtx;
+  if (!ctx.player.items.includes('singularidad')) return;
+  if (ctx.singularidadActive) return; // already in pull phase
+  ctx.singularidadKills++;
 }
 
 /** Apply item onPickup and install reactions. */

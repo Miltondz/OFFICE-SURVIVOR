@@ -5,6 +5,12 @@ import { iconKey } from '@/config/icons.config';
 
 const ITEM_ICON_DISPLAY = 26;   // tamaño en pantalla del icono del ítem en el cofre del mapa
 
+/**
+ * Fallback icon key used when an item has no dedicated `item_<id>` texture loaded.
+ * Reuses an existing icon that is always loaded (lapicero_roto is in ICON_IDS). (balance v2)
+ */
+const GENERIC_ITEM_ICON = iconKey('lapicero_roto');
+
 export type PickupKind = 'cafe' | 'galleta' | 'moneda' | 'stress' | 'item' | 'upgrade';
 
 // §7.4 — 'item' = chest/gift (grants a random passive item), 'upgrade' = star (player stat choice)
@@ -39,8 +45,18 @@ export class Pickup extends Phaser.GameObjects.Rectangle {
     const body = this.body as Phaser.Physics.Arcade.StaticBody;
     body.reset(x, y);
 
-    // Cofre 'item' con ítem pre-elegido → mostrar el icono real del ítem (item_<id>).
-    const itemTex = kind === 'item' && itemId ? iconKey(itemId) : null;
+    // Cofre 'item': mostrar el icono real del ítem si existe, o el icono genérico si no. (balance v2)
+    // Para items E1/E2 que no tienen item_<id> cargado se usa GENERIC_ITEM_ICON (lapicero_roto).
+    // El cofre nunca debe verse como un cuadro de color liso.
+    let itemTex: string | null = null;
+    if (kind === 'item') {
+      const specific = itemId ? iconKey(itemId) : null;
+      if (specific && this.scene.textures.exists(specific)) {
+        itemTex = specific;
+      } else if (this.scene.textures.exists(GENERIC_ITEM_ICON)) {
+        itemTex = GENERIC_ITEM_ICON; // fallback genérico (balance v2)
+      }
+    }
     const cfg = PICKUP_SPRITES[kind];
     const texKey = `pickup_${kind}`;
 

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COMBAT, SPAWN, BOSS } from '@/config/game.config';
+import { COMBAT, SPAWN, BOSS, ITEMS_E2 } from '@/config/game.config';
 import { CHAR } from '@/config/characters.config';
 import type { RunContext } from './RunContext';
 import type { EnemyType } from '@/types';
@@ -69,6 +69,11 @@ export class EnemySystem {
         }
 
         this.weaponSys.onProjectileHit(proj, enemy.x, enemy.y, enemy);
+
+        // §E2 avalancha: primary hit → spawn secondary projectile toward nearest enemy — nuevo (fase E2)
+        if (!proj.isSecondary && this.ctx.player.items.includes('avalancha')) {
+          this.weaponSys.spawnAvalanchaSecondary(enemy.x, enemy.y, proj.damage, proj.sourceId);
+        }
 
         // Knockback
         if (proj.effectTag === 'knockback') {
@@ -233,7 +238,21 @@ export class EnemySystem {
           this.spawnZone(e.x, e.y, SPAWN.POLISH_RADIUS, SPAWN.POLISH_DPS, SPAWN.POLISH_DURATION_MS);
         }
       }
+
+      // §E2 cable_trampa: stun nearby enemy if in radius and cooldown ready — nuevo (fase E2)
+      if (this.ctx.player.items.includes('cable_trampa') && this.ctx.cableTrapCooldownMs <= 0) {
+        const dist = Phaser.Math.Distance.Between(e.x, e.y, this.playerRef.x, this.playerRef.y);
+        if (dist <= ITEMS_E2.CABLE_RADIUS) {
+          e.applyEffect('stun', ITEMS_E2.CABLE_STUN_MS);
+          this.ctx.cableTrapCooldownMs = ITEMS_E2.CABLE_COOLDOWN_MS;
+        }
+      }
     });
+
+    // §E2 cable_trampa: tick cooldown — nuevo (fase E2)
+    if (this.ctx.cableTrapCooldownMs > 0) {
+      this.ctx.cableTrapCooldownMs -= delta;
+    }
 
     // Damage zones DPS to player
     this.zonePool.getChildren().forEach(go => {
@@ -338,5 +357,29 @@ export class EnemySystem {
 
   getActiveCount(): number {
     return this.enemyPool.getChildren().filter(g => (g as Enemy).isActive2).length;
+  }
+
+  /**
+   * §E2 singularidad: pull all active enemies within radius toward (cx,cy) for one tick,
+   * and deal dps × delta/1000 damage. Called from GameScene.update while singularidad active.
+   * — nuevo (fase E2)
+   */
+  applySingularidadPull(cx: number, cy: number, delta: number): void {
+    const dps = ITEMS_E2.SINGULARIDAD_DPS;
+    const pull = ITEMS_E2.SINGULARIDAD_PULL_FORCE;
+    const radius = ITEMS_E2.SINGULARIDAD_RADIUS;
+    this.enemyPool.getChildren().forEach(go => {
+      const e = go as Enemy;
+      if (!e.isActive2) return;
+      const dist = Phaser.Math.Distance.Between(cx, cy, e.x, e.y);
+      if (dist <= radius && dist > 1) {
+        // Pull: move enemy toward center
+        const angle = Phaser.Math.Angle.Between(e.x, e.y, cx, cy);
+        const step = pull * delta / 1000;
+        e.setPosition(e.x + Math.cos(angle) * step, e.y + Math.sin(angle) * step);
+        // Damage DPS
+        e.takeDamage(dps * delta / 1000, 'singularidad');
+      }
+    });
   }
 }

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COMBAT, SPAWN, COLORS_GAME, WAVE_EVENTS, CURSES, ITEMS_E1 } from '@/config/game.config';
+import { COMBAT, SPAWN, COLORS_GAME, WAVE_EVENTS, CURSES, ITEMS_E1, ITEMS_E2 } from '@/config/game.config';
 import type { RunContext } from './RunContext';
 import type { WeaponDefinition } from '@/types';
 import { Projectile } from '@/entities/Projectile';
@@ -52,6 +52,9 @@ export class WeaponSystem {
     this.enemySys = enemySys;
     this.zonePool = zonePool;
 
+    // §E2 magnetismo_balas: expose nearest-enemy lookup to Projectile for steering — nuevo (fase E2)
+    Projectile.getNearestEnemyFn = (x, y, range) => enemySys.getNearestEnemy(x, y, range);
+
     this.projectilePool = this.scene.physics.add.group({
       classType: Projectile,
       maxSize: COMBAT.PROJECTILE_POOL_SIZE,
@@ -76,6 +79,18 @@ export class WeaponSystem {
     this.ctx.player.weapons = this.weapons.map(w => w.definitionId);
     this.ctx.weaponLevels = Object.fromEntries(this.weapons.map(w => [w.definitionId, w.level]));
     this.recomputeWeaponMods();
+  }
+
+  /** Vende/quita un arma (libera slot). Nunca deja al jugador sin armas. Devuelve true si se quitó. */
+  removeWeapon(id: string): boolean {
+    if (this.weapons.length <= 1) return false;   // siempre debe quedar ≥1 arma
+    const idx = this.weapons.findIndex(w => w.definitionId === id);
+    if (idx === -1) return false;
+    this.weapons.splice(idx, 1);
+    this.ctx.player.weapons = this.weapons.map(w => w.definitionId);
+    this.ctx.weaponLevels = Object.fromEntries(this.weapons.map(w => [w.definitionId, w.level]));
+    this.recomputeWeaponMods();
+    return true;
   }
 
   /** Reset per-weapon mods and re-apply item-driven bonuses. Call after every item pickup and on level-up. */
@@ -376,12 +391,68 @@ export class WeaponSystem {
     effect: ProjectileEffect,
     lifespanMs: number = COMBAT.PROJECTILE_LIFESPAN_MS,
     isCrit = false,
+    isSecondary = false,
   ): Projectile | null {
     const p = this.projectilePool.get(x, y) as Projectile | null;
     if (!p) return null;
     p.fire(x, y, vx, vy, damage, sourceId, pierceLeft, bounceLeft, effect, lifespanMs);
     p.isCrit = isCrit;
+    p.isSecondary = isSecondary;
+    // §E2 rebote_de_pared: set wall-bounce budget from modifiers — nuevo (fase E2)
+    if (!isSecondary && this.ctx.player.items.includes('rebote_de_pared')) {
+      p.wallBounceLeft = this.ctx.modifiers.wallBounce + this.ctx.modifiers.bounce;
+    }
+    // §E2 magnetismo_balas: enable homing for non-secondary projectiles — nuevo (fase E2)
+    if (!isSecondary && this.ctx.player.items.includes('magnetismo_balas')) {
+      p.magnetic = true;
+    }
     return p;
+  }
+
+  /**
+   * §E2 fotocopiadora_armas: add a duplicate instance of the weapon with the most kills.
+   * Called from ItemReactions on pickup. — nuevo (fase E2)
+   */
+  duplicateTopKillWeapon(): void {
+    const killsByWeapon = this.ctx.stats.killsByWeapon;
+    let topId: string | null = null;
+    let topKills = -1;
+    for (const inst of this.weapons) {
+      const k = killsByWeapon[inst.definitionId] ?? 0;
+      if (k > topKills) { topKills = k; topId = inst.definitionId; }
+    }
+    if (!topId && this.weapons.length > 0) topId = this.weapons[0].definitionId;
+    if (!topId) return;
+    // Respect max weapon slots
+    if (this.weapons.length >= this.ctx.modifiers.maxWeapons) return;
+    this.weapons.push({ definitionId: topId, level: 1, lastFiredAt: 0, damageMult: 1, fireRateMult: 1 });
+    this.ctx.player.weapons = this.weapons.map(w => w.definitionId);
+    this.ctx.weaponLevels = Object.fromEntries(this.weapons.map(w => [w.definitionId, w.level]));
+    this.recomputeWeaponMods();
+  }
+
+  /**
+   * §E2 avalancha: spawn a secondary projectile from impact point toward nearest enemy.
+   * Called from EnemySystem on projectile hit when item owned. — nuevo (fase E2)
+   */
+  spawnAvalanchaSecondary(x: number, y: number, parentDamage: number, parentSourceId: string): void {
+    const target = this.enemySys.getNearestEnemy(x, y, 400);
+    const dmg = parentDamage * ITEMS_E2.AVALANCHA_DMG_RATIO;
+    const speed = COMBAT.PROJECTILE_DEFAULT_SPEED * this.ctx.modifiers.projectileSpeedMult;
+    let vx = speed;
+    let vy = 0;
+    if (target) {
+      const a = Phaser.Math.Angle.Between(x, y, target.x, target.y);
+      vx = Math.cos(a) * speed;
+      vy = Math.sin(a) * speed;
+    }
+    this.spawnProjectile(
+      x, y, vx, vy,
+      dmg, parentSourceId,
+      0, 0, 'none',
+      COMBAT.PROJECTILE_LIFESPAN_MS, false,
+      true, // isSecondary — no wall bounce, no magnet, no avalancha chain
+    );
   }
 
   /** Returns { dmg, isCrit } — isCrit exposed so projectile can carry it for damage numbers. */

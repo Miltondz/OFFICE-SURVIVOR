@@ -1,6 +1,7 @@
 // src/systems/DamageNumbers.ts
 import Phaser from 'phaser';
 import { FEEL } from '@/config/game.config';
+import { SaveManager } from '@/systems/SaveManager';
 
 type DamageKind = 'normal' | 'crit' | 'player';
 
@@ -14,9 +15,12 @@ interface DmgConfig {
 export class DamageNumbers {
   private pool: Phaser.GameObjects.Text[] = [];
   private scene: Phaser.Scene;
+  /** Whether to render damage numbers. Updated live via setEnabled(). */
+  private enabled: boolean;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
+    this.enabled = SaveManager.load().settings.damageNumbers;
     // Pre-create pool
     for (let i = 0; i < FEEL.DMG_NUM_POOL; i++) {
       const t = scene.add.text(0, 0, '', {
@@ -30,7 +34,12 @@ export class DamageNumbers {
     }
   }
 
+  setEnabled(value: boolean): void {
+    this.enabled = value;
+  }
+
   show({ value, x, y, kind }: DmgConfig): void {
+    if (!this.enabled) return;
     const text = this.acquire();
     if (!text) return;
 

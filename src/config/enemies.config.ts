@@ -55,9 +55,9 @@ export const ENEMY_DISPLAY_H: Record<string, number> = {
   angry_email: 34,
   toxic_manager: 56,
   possessed_printer: 58,
-  auditor: 58,
+  auditor: 46,                // era 58 — auditor más chico (balance v2)
   hr_rep: 50,
-  angry_client: 40,
+  angry_client: 52,           // era 40 — cliente furioso más grande (balance v2)
   cleaning_lady: 50,
 };
 

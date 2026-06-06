@@ -173,7 +173,7 @@ export const MAP = {
   VENDING_COOLDOWN_S: 60,
   VENDING_RANGE: 52,
   EXTINTOR_STRESS: 25,
-  DESK: { w: 64, h: 32, color: 0x6b5030 },
+  DESK: { w: 78, h: 40, color: 0x6b5030 },   // era w:64,h:32 — collider agrandado acorde al sprite mayor (balance v2)
   CABINET: { w: 32, h: 48, color: 0x4a4a5a },
   PLANT: { w: 32, h: 32, color: 0x2e7d32 },
   FUNC_SIZE: 40,
@@ -183,7 +183,8 @@ export const MAP = {
   EXTINTOR_BORDER: 0xffffff,
   // Alto en pantalla de cada prop con sprite (px); el ancho conserva el aspecto del arte.
   // El collider sigue usando w/h de arriba (gameplay); el sprite es solo visual y puede ser mayor.
-  SPRITE_H: { desk: 46, cabinet: 64, plant: 54, coffee: 56, vending: 86, extintor: 40 },
+  SPRITE_H: { desk: 56, cabinet: 64, plant: 54, coffee: 36, vending: 86, extintor: 40 },
+  // desk: era 46 — escritorios más grandes (balance v2); coffee: era 56 — cafetera era enorme (balance v2)
 } as const;
 
 export const CURSES = {
@@ -219,7 +220,7 @@ export const COMBAT = {
   CONTACT_DAMAGE_COOLDOWN_MS: 500,  // enemy can damage player at most this often
   MAX_WEAPONS_BASE: 4,
   MAX_WEAPONS_WITH_MONITOR: 5,
-  WEAPON_MAX_LEVEL: 3,
+  WEAPON_MAX_LEVEL: 5,              // era 3 — subir hasta nivel V comprando duplicados (balance v2)
   WEAPON_LEVEL_DAMAGE_STEP: 0.15,   // +15% per copy
   WEAPON_LEVEL_FIRERATE_STEP: 0.10, // +10% per copy
   LASER_WIDTH: 12,                  // debug_laser beam hit width (px)
@@ -450,6 +451,39 @@ export const PICKUPS = {
   ITEM_DROP_CHANCE: 0.04,          // probability on normal enemy death
   ITEM_DROP_ELITE_MULT: 3,         // élite ×3 chance
   UPGRADE_DROP_CHANCE: 0.015,      // upgrade star drop chance
+} as const;
+
+// ─── §E2 — Nuevos ítems (fase E2) ────────────────────────────────────────────
+export const ITEMS_E2 = {
+  // rebote_de_pared: wall-bounce budget base; With fotocopiadora adds modifiers.bounce — nuevo (fase E2)
+  REBOTE_BASE_BUDGET: 1,                  // nuevo (fase E2)
+  // magnetismo_balas: turn rate (rad/s) for bullet homing toward nearest enemy — nuevo (fase E2)
+  MAGNET_TURN_RATE: 3.5,                  // nuevo (fase E2)
+  MAGNET_RANGE: 320,                      // px range to seek nearest enemy — nuevo (fase E2)
+  // avalancha: secondary projectile damage fraction of parent — nuevo (fase E2)
+  AVALANCHA_DMG_RATIO: 0.5,              // nuevo (fase E2)
+  // segundo_corazon: hidden second HP pool — nuevo (fase E2)
+  SEGUNDO_CORAZON_HP: 50,                // nuevo (fase E2)
+  // teletransporte: trigger threshold and cooldown — nuevo (fase E2)
+  TELEPORT_HP_THRESHOLD: 0.25,           // nuevo (fase E2)
+  TELEPORT_COOLDOWN_MS: 30000,           // nuevo (fase E2)
+  TELEPORT_MARGIN: 80,                   // keep away from map edges px — nuevo (fase E2)
+  // cronometro_bala: time-slow on first drop to ≤30% HP — nuevo (fase E2)
+  CRONO_HP_THRESHOLD: 0.30,             // nuevo (fase E2)
+  CRONO_TIME_SCALE: 0.3,               // nuevo (fase E2)
+  CRONO_DURATION_MS: 5000,             // real-time ms — nuevo (fase E2)
+  // cable_trampa: stun aura — nuevo (fase E2)
+  CABLE_RADIUS: 80,                     // nuevo (fase E2)
+  CABLE_STUN_MS: 800,                   // nuevo (fase E2)
+  CABLE_COOLDOWN_MS: 3000,             // nuevo (fase E2)
+  // singularidad: every N kills pull+damage — nuevo (fase E2)
+  SINGULARIDAD_KILL_INTERVAL: 30,       // nuevo (fase E2)
+  SINGULARIDAD_RADIUS: 200,            // pull/damage radius px — nuevo (fase E2)
+  SINGULARIDAD_DPS: 25,                // damage per second inside radius — nuevo (fase E2)
+  SINGULARIDAD_PULL_FORCE: 160,        // px/s pull speed toward center — nuevo (fase E2)
+  SINGULARIDAD_DURATION_MS: 3000,      // nuevo (fase E2)
+  // fotocopiadora_armas: duplicate top-kill weapon once per run — nuevo (fase E2)
+  // (no numeric constants needed beyond existing killsByWeapon)
 } as const;
 
 // ─── §E1 — Nuevos ítems (fase E1) ────────────────────────────────────────────

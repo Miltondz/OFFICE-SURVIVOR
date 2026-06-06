@@ -23,7 +23,7 @@ const RARITY_COLORS: Record<string, string> = {
 };
 
 const CARD_W = 150;
-const CARD_H = 196;
+const CARD_H = 240;    // era 196 — taller to fit description text below type label (Ticket 3.1)
 const CARD_GAP = 16;
 const CARD_TOP = 96;   // shifted down a few px to make room for the timer bar
 
@@ -51,6 +51,7 @@ export class ShopOverlay extends Phaser.Scene {
   private sellMode = false;
   private sellBtnLabel!: Phaser.GameObjects.Text;
   private inventoryContainer!: Phaser.GameObjects.Container;
+  private weaponSlotsContainer!: Phaser.GameObjects.Container;
 
   // Timer bar
   private timerBar!: Phaser.GameObjects.Rectangle;
@@ -111,7 +112,8 @@ export class ShopOverlay extends Phaser.Scene {
       fontSize: '16px', color: '#ffd700', fontStyle: 'bold', stroke: '#000000', strokeThickness: 2,
     }).setOrigin(1, 0).setDepth(6);
 
-    // Weapon slots row
+    // Weapon slots row (en contenedor para poder reconstruir tras comprar/vender)
+    this.weaponSlotsContainer = this.add.container(0, 0).setDepth(6);
     this.buildWeaponSlots();
 
     // Cards area
@@ -157,6 +159,7 @@ export class ShopOverlay extends Phaser.Scene {
   // ── Weapon slots ─────────────────────────────────────────────────────────
 
   private buildWeaponSlots(): void {
+    this.weaponSlotsContainer.removeAll(true);
     const cx = GAME.WIDTH / 2;
     const slotSize = 44;
     const gap = 10;
@@ -165,27 +168,34 @@ export class ShopOverlay extends Phaser.Scene {
     const totalW = maxW * (slotSize + gap) - gap;
     const startX = cx - totalW / 2;
 
-    this.add.text(cx, slotY - slotSize / 2 - 12, 'ARMAS EQUIPADAS:', {
+    this.weaponSlotsContainer.add(this.add.text(cx, slotY - slotSize / 2 - 12, 'ARMAS EQUIPADAS:', {
       fontSize: '11px', color: '#888888',
-    }).setOrigin(0.5).setDepth(6);
+    }).setOrigin(0.5).setDepth(6));
 
     for (let i = 0; i < maxW; i++) {
       const sx = startX + i * (slotSize + gap);
       const filled = i < this.ctx.player.weapons.length;
       const weapId = this.ctx.player.weapons[i];
-      const bg = this.add.rectangle(sx + slotSize / 2, slotY, slotSize, slotSize, filled ? 0x333355 : 0x111122)
-        .setStrokeStyle(2, filled ? 0x4444aa : 0x333344).setDepth(6);
-      void bg;
+      this.weaponSlotsContainer.add(
+        this.add.rectangle(sx + slotSize / 2, slotY, slotSize, slotSize, filled ? 0x333355 : 0x111122)
+          .setStrokeStyle(2, filled ? 0x4444aa : 0x333344).setDepth(6),
+      );
 
       if (filled && weapId) {
         const ikey = iconKey(weapId);
         if (this.textures.exists(ikey)) {
-          this.add.image(sx + slotSize / 2, slotY, ikey)
-            .setDisplaySize(slotSize - 8, slotSize - 8).setDepth(7);
+          this.weaponSlotsContainer.add(this.add.image(sx + slotSize / 2, slotY, ikey)
+            .setDisplaySize(slotSize - 8, slotSize - 8).setDepth(7));
         } else {
-          this.add.text(sx + slotSize / 2, slotY, '⚔', { fontSize: '20px', color: '#aaaacc' })
-            .setOrigin(0.5).setDepth(7);
+          this.weaponSlotsContainer.add(this.add.text(sx + slotSize / 2, slotY, '⚔', { fontSize: '20px', color: '#aaaacc' })
+            .setOrigin(0.5).setDepth(7));
         }
+        // Nivel del arma (I..V) en la esquina del slot
+        const lvl = this.ctx.weaponLevels[weapId] ?? 1;
+        this.weaponSlotsContainer.add(this.add.text(sx + slotSize - 6, slotY + slotSize / 2 - 6,
+          ['I', 'II', 'III', 'IV', 'V'][Math.min(4, lvl - 1)], {
+            fontSize: '10px', color: '#ffe680', fontStyle: 'bold', stroke: '#000000', strokeThickness: 2,
+          }).setOrigin(1, 1).setDepth(8));
       }
     }
   }
@@ -372,9 +382,34 @@ export class ShopOverlay extends Phaser.Scene {
     const typeLabel = isWeaponOwned
       ? 'SUBIR NIV.'
       : (entry.isWeapon ? 'ARMA' : (entry.def as ItemDefinition).category.toUpperCase());
-    container.add(this.add.text(cx, typeY, typeLabel, {
+    const typeTxt = this.add.text(cx, typeY, typeLabel, {
       fontSize: '8px', color: '#8a8aa0',
-    }).setOrigin(0.5, 0));
+    }).setOrigin(0.5, 0);
+    container.add(typeTxt);
+
+    // 4b. Description (Ticket 3.1 — re-added)
+    const descY = typeY + typeTxt.height + 3;
+    const rawDesc = entry.isWeapon
+      ? (entry.def as WeaponDefinition).description
+      : (entry.def as ItemDefinition).description;
+    const descTxt = this.add.text(cx, descY, rawDesc ?? '', {
+      fontSize: '8px', color: '#aaaacc',
+      wordWrap: { width: CARD_W - 12 }, align: 'center', lineSpacing: 1,
+    }).setOrigin(0.5, 0);
+    container.add(descTxt);
+
+    // 4c. Weapon level-up effect hint (Ticket 3.1)
+    if (isWeaponOwned) {
+      const wLevel = (this.ctx.weaponLevels[entry.def.id] ?? 0) + 1; // current level (1-based after first buy)
+      const nextLevel = Math.min(wLevel + 1, COMBAT.WEAPON_MAX_LEVEL);
+      const dmgPct = Math.round(COMBAT.WEAPON_LEVEL_DAMAGE_STEP * 100);
+      const frPct = Math.round(COMBAT.WEAPON_LEVEL_FIRERATE_STEP * 100);
+      const hintY = descY + descTxt.height + 2;
+      container.add(this.add.text(cx, hintY, `Niv ${wLevel}→${nextLevel}: +${dmgPct}% daño / +${frPct}% cadencia`, {
+        fontSize: '7px', color: '#88ff88',
+        wordWrap: { width: CARD_W - 12 }, align: 'center',
+      }).setOrigin(0.5, 0));
+    }
 
     // 5. Bottom row: price | COMPRAR
     const rowY = CARD_H - 24;
@@ -456,6 +491,7 @@ export class ShopOverlay extends Phaser.Scene {
     // Remove card from stock and rebuild
     this.stock.splice(idx, 1);
     this.buildCards();
+    this.buildWeaponSlots();   // refrescar armas equipadas + slots libres tras comprar
     this.updateCoinLabel();
     this.refreshRerollButton();
     this.refreshSellButton();
@@ -497,11 +533,12 @@ export class ShopOverlay extends Phaser.Scene {
     this.refreshSellButton();
   }
 
-  /** Sell price for an owned item: floor(scaledPrice * SELL_REFUND_RATIO) */
-  private sellPriceFor(itemId: string): number {
-    const def = ITEMS.find((it) => it.id === itemId);
-    if (!def) return 0;
-    const sp = this.scaledPrice(def.rarity, false);
+  /** Sell price for an owned item OR weapon: floor(scaledPrice(rarity) * SELL_REFUND_RATIO) */
+  private sellPriceFor(id: string): number {
+    const item = ITEMS.find((it) => it.id === id);
+    const rarity = item?.rarity ?? WEAPONS.find((w) => w.id === id)?.rarity;
+    if (!rarity) return 0;
+    const sp = this.scaledPrice(rarity, false);
     return Math.floor(sp * SHOP.SELL_REFUND_RATIO);
   }
 
@@ -522,69 +559,76 @@ export class ShopOverlay extends Phaser.Scene {
     });
     this.inventoryContainer.add(bg);
 
-    this.inventoryContainer.add(this.add.text(W / 2, panelY + 16, 'VENDER ÍTEM — elige uno', {
+    this.inventoryContainer.add(this.add.text(W / 2, panelY + 16, 'VENDER — elige arma o ítem', {
       fontSize: '13px', color: '#ffaa00', fontStyle: 'bold',
     }).setOrigin(0.5, 0).setDepth(13));
 
-    // List owned passive items
-    const ownedPassive = this.ctx.player.items.filter((id) => {
+    // Vendibles: armas (solo si hay >1, siempre queda 1) + ítems pasivos.
+    type Sellable = { id: string; isWeapon: boolean };
+    const sellables: Sellable[] = [];
+    if (this.ctx.player.weapons.length > 1) {
+      for (const wid of this.ctx.player.weapons) sellables.push({ id: wid, isWeapon: true });
+    }
+    for (const id of this.ctx.player.items) {
       const def = ITEMS.find((it) => it.id === id);
-      return def !== undefined && def.category !== 'consumable';
-    });
+      if (def && def.category !== 'consumable') sellables.push({ id, isWeapon: false });
+    }
 
-    if (ownedPassive.length === 0) {
-      this.inventoryContainer.add(this.add.text(W / 2, panelY + 60, 'No tienes ítems pasivos para vender.', {
+    if (sellables.length === 0) {
+      this.inventoryContainer.add(this.add.text(W / 2, panelY + 60, 'Nada para vender (debe quedar ≥1 arma).', {
         fontSize: '11px', color: '#888888',
       }).setOrigin(0.5, 0).setDepth(13));
     } else {
       const itemsPerRow = 5;
       const slotSize = 52;
       const slotGap = 8;
-      const rowsTotal = Math.ceil(ownedPassive.length / itemsPerRow);
-      const gridW = Math.min(ownedPassive.length, itemsPerRow) * (slotSize + slotGap) - slotGap;
+      const rowsTotal = Math.ceil(sellables.length / itemsPerRow);
+      const gridW = Math.min(sellables.length, itemsPerRow) * (slotSize + slotGap) - slotGap;
       const gridStartX = W / 2 - gridW / 2;
       const gridStartY = panelY + 44;
 
-      ownedPassive.forEach((id, idx) => {
-        const def = ITEMS.find((it) => it.id === id)!;
+      sellables.forEach((s, idx) => {
         const col = idx % itemsPerRow;
         const row = Math.floor(idx / itemsPerRow);
         const sx = gridStartX + col * (slotSize + slotGap);
         const sy = gridStartY + row * (slotSize + slotGap);
-        const refund = this.sellPriceFor(id);
+        const refund = this.sellPriceFor(s.id);
+        const rarity = s.isWeapon
+          ? WEAPONS.find((w) => w.id === s.id)?.rarity
+          : ITEMS.find((it) => it.id === s.id)?.rarity;
 
-        const slotBg = this.add.rectangle(sx + slotSize / 2, sy + slotSize / 2, slotSize, slotSize, 0x221122)
-          .setStrokeStyle(1, 0x884488).setDepth(13).setInteractive({ useHandCursor: true });
+        // Armas con borde azul para distinguirlas
+        const idle = s.isWeapon ? 0x112244 : 0x221122;
+        const hover = s.isWeapon ? 0x224488 : 0x442244;
+        const slotBg = this.add.rectangle(sx + slotSize / 2, sy + slotSize / 2, slotSize, slotSize, idle)
+          .setStrokeStyle(1, s.isWeapon ? 0x4488cc : 0x884488).setDepth(13).setInteractive({ useHandCursor: true });
         this.inventoryContainer.add(slotBg);
 
-        const ikey = iconKey(id);
+        const ikey = iconKey(s.id);
         if (this.textures.exists(ikey)) {
-          const img = this.add.image(sx + slotSize / 2, sy + slotSize / 2 - 4, ikey)
-            .setDisplaySize(slotSize - 12, slotSize - 12).setDepth(14);
-          this.inventoryContainer.add(img);
+          this.inventoryContainer.add(this.add.image(sx + slotSize / 2, sy + slotSize / 2 - 4, ikey)
+            .setDisplaySize(slotSize - 12, slotSize - 12).setDepth(14));
         } else {
-          const lbl = this.add.text(sx + slotSize / 2, sy + slotSize / 2 - 4, '◆', {
-            fontSize: '24px', color: RARITY_COLORS[def.rarity] ?? '#ffffff',
-          }).setOrigin(0.5).setDepth(14);
-          this.inventoryContainer.add(lbl);
+          this.inventoryContainer.add(this.add.text(sx + slotSize / 2, sy + slotSize / 2 - 4, s.isWeapon ? '⚔' : '◆', {
+            fontSize: '24px', color: RARITY_COLORS[rarity ?? 'common'] ?? '#ffffff',
+          }).setOrigin(0.5).setDepth(14));
         }
 
-        const refundTxt = this.add.text(sx + slotSize / 2, sy + slotSize - 10, `🪙${refund}`, {
+        this.inventoryContainer.add(this.add.text(sx + slotSize / 2, sy + slotSize - 10, `🪙${refund}`, {
           fontSize: '8px', color: '#ffd700',
-        }).setOrigin(0.5, 1).setDepth(14);
-        this.inventoryContainer.add(refundTxt);
+        }).setOrigin(0.5, 1).setDepth(14));
 
-        slotBg.on('pointerover', () => slotBg.setFillStyle(0x442244));
-        slotBg.on('pointerout', () => slotBg.setFillStyle(0x221122));
+        slotBg.on('pointerover', () => slotBg.setFillStyle(hover));
+        slotBg.on('pointerout', () => slotBg.setFillStyle(idle));
         slotBg.on('pointerup', () => {
           this.audio.playBeep('click', 'ui');
-          this.sellItem(id, refund);
+          if (s.isWeapon) this.sellWeapon(s.id, refund);
+          else this.sellItem(s.id, refund);
         });
       });
 
-      // Keep a small note below rows
       const noteY = gridStartY + rowsTotal * (slotSize + slotGap) + 4;
-      this.inventoryContainer.add(this.add.text(W / 2, noteY, 'Haz clic en el ítem a vender', {
+      this.inventoryContainer.add(this.add.text(W / 2, noteY, 'Clic para vender (50%). Armas azules.', {
         fontSize: '10px', color: '#666666',
       }).setOrigin(0.5, 0).setDepth(13));
     }
@@ -612,6 +656,21 @@ export class ShopOverlay extends Phaser.Scene {
     this.ctx.bus.emit('upgrade:item_selected', { id: itemId }); // notify HUD
     this.exitSellMode();
     this.buildCards(); // refresh (cap may have freed up)
+    this.updateCoinLabel();
+    this.refreshRerollButton();
+    this.refreshSellButton();
+  }
+
+  /** Vender un arma del slot (libera espacio). Nunca deja al jugador sin armas. */
+  private sellWeapon(weaponId: string, refund: number): void {
+    if (this.ctx.player.weapons.length <= 1) return;   // siempre debe quedar ≥1 arma
+    // GameScene escucha 'weapon:sell' y llama a WeaponSystem.removeWeapon (síncrono vía bus).
+    this.ctx.bus.emit('weapon:sell', { id: weaponId });
+    this.ctx.player.coins += refund;
+    this.sellCount++;
+    this.exitSellMode();
+    this.buildCards();
+    this.buildWeaponSlots();   // refrescar slots tras liberar uno
     this.updateCoinLabel();
     this.refreshRerollButton();
     this.refreshSellButton();

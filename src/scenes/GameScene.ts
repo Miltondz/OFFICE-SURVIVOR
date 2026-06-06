@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SCENES, GAME, MAP, SPAWN, BOSS, FEEL, CURSES, MINIBOSS } from '@/config/game.config';
+import { SCENES, GAME, MAP, SPAWN, BOSS, FEEL, CURSES, MINIBOSS, ITEMS_E2, WAVES } from '@/config/game.config';
 import { SceneManager } from '@/systems/SceneManager';
 import { EventBus } from '@/systems/EventBus';
 import { createRunContext, recomputeModifiers, applyCharacter } from '@/systems/RunContext';
@@ -79,6 +79,10 @@ export class GameScene extends Phaser.Scene {
   // Regen accumulator
   private regenAccum = 0;
 
+  // §E2 singularidad: position of active pull center — nuevo (fase E2)
+  private _singularidadX = 0;
+  private _singularidadY = 0;
+
   constructor() {
     super({ key: SCENES.GAME });
   }
@@ -99,6 +103,8 @@ export class GameScene extends Phaser.Scene {
     this.regenAccum = 0;
 
     this.ctx = createRunContext();
+    this._singularidadX = 0;
+    this._singularidadY = 0;
 
     this.ctx.character = getCharacterById(this.selectedCharacterId);
     applyCharacter(this.ctx);
@@ -161,12 +167,33 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, MAP.WIDTH, MAP.HEIGHT);
     this.cameras.main.startFollow(this.player.body, true, 0.1, 0.1);
 
+    // FASE H — apply zoom setting (0 = auto/FIT, 1..3 = explicit zoom on main camera only)
+    const _zoomSetting = saveForMeta.settings.zoom;
+    if (_zoomSetting >= 1) {
+      this.cameras.main.setZoom(_zoomSetting);
+    }
+
     // Inyectar el viewport de cámara al SpawnDirector para spawns off-screen
     this.spawnDir.setViewportProvider(() => this.cameras.main.worldView);
 
     // Apuntado de armas al jefe/miniboss (no están en enemyPool).
     this.weaponSys.setBossTargetProvider(() => {
-      if (this.miniboss?.alive) return { x: this.miniboss.body.x, y: this.miniboss.body.y };
+      if (this.miniboss?.alive) {
+        // Comité: su body central está deshabilitado/fijo; apuntar al miembro vivo más cercano
+        // (si no, las balas van a un punto muerto y no se le puede dañar).
+        if (this.miniboss instanceof CommitteeBoss) {
+          const bodies = this.miniboss.getAliveMemberBodies();
+          if (bodies.length === 0) return null;
+          let best = bodies[0].body;
+          let bestD = Infinity;
+          for (const { body } of bodies) {
+            const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, body.x, body.y);
+            if (d < bestD) { bestD = d; best = body; }
+          }
+          return { x: best.x, y: best.y };
+        }
+        return { x: this.miniboss.body.x, y: this.miniboss.body.y };
+      }
       if (this.boss?.alive) return { x: this.boss.body.x, y: this.boss.body.y };
       return null;
     });
@@ -224,6 +251,13 @@ export class GameScene extends Phaser.Scene {
 
     this.ctx.bus.on('upgrade:weapon_selected', (p: { id: string }) => {
       this.weaponSys.addOrLevel(p.id);
+      recomputeModifiers(this.ctx);
+      this.weaponSys.recomputeWeaponMods();
+    });
+
+    // Venta de arma desde la tienda (libera slot; nunca deja al jugador sin armas).
+    this.ctx.bus.on('weapon:sell', (p: { id: string }) => {
+      this.weaponSys.removeWeapon(p.id);
       recomputeModifiers(this.ctx);
       this.weaponSys.recomputeWeaponMods();
     });
@@ -306,6 +340,24 @@ export class GameScene extends Phaser.Scene {
 
     this.spawnDir.triggerFirstWave();
     installItemReactions(this.ctx);
+
+    // §E2 cronometro_bala: slow time when triggered from Player.takeDamage — nuevo (fase E2)
+    this.player.onCronometroActivate = () => {
+      if (this.gameOver || this.victory) return;
+      this.time.timeScale = ITEMS_E2.CRONO_TIME_SCALE;
+      this.physics.world.timeScale = 1 / ITEMS_E2.CRONO_TIME_SCALE; // compensate player physics
+      // Restore after real-time duration using a wall-clock callback (not scene time)
+      const startWall = Date.now();
+      const restore = (): void => {
+        if (Date.now() - startWall >= ITEMS_E2.CRONO_DURATION_MS) {
+          this.time.timeScale = 1;
+          this.physics.world.timeScale = 1;
+        } else {
+          setTimeout(restore, 100);
+        }
+      };
+      setTimeout(restore, ITEMS_E2.CRONO_DURATION_MS);
+    };
 
     // Consultor Externo — "Por Hora"
     if (this.ctx.character.timeScaling) {
@@ -401,6 +453,28 @@ export class GameScene extends Phaser.Scene {
 
     if (this.ctx.player.items.includes('yolo') && this.ctx.player.stress < 90) {
       this.ctx.player.stress = 90;
+    }
+
+    // §E2 singularidad: trigger pull phase when kill threshold reached — nuevo (fase E2)
+    if (this.ctx.player.items.includes('singularidad')) {
+      if (!this.ctx.singularidadActive
+        && this.ctx.singularidadKills >= ITEMS_E2.SINGULARIDAD_KILL_INTERVAL) {
+        this.ctx.singularidadKills = 0;
+        this.ctx.singularidadActive = true;
+        // Visual indicator: brief flash ellipse at player position
+        const sx = this.player.x;
+        const sy = this.player.y;
+        const indicator = this.add.ellipse(sx, sy, ITEMS_E2.SINGULARIDAD_RADIUS * 2, ITEMS_E2.SINGULARIDAD_RADIUS * 2, 0x220033, 0.35).setDepth(3);
+        this.time.delayedCall(ITEMS_E2.SINGULARIDAD_DURATION_MS, () => {
+          indicator.destroy();
+          this.ctx.singularidadActive = false;
+        });
+        this._singularidadX = sx;
+        this._singularidadY = sy;
+      }
+      if (this.ctx.singularidadActive) {
+        this.enemySys.applySingularidadPull(this._singularidadX, this._singularidadY, delta);
+      }
     }
 
     if (this.weaponSys.weapons.length > 0) {
@@ -500,7 +574,9 @@ export class GameScene extends Phaser.Scene {
   // ─── Utilities ────────────────────────────────────────────────────────────
 
   private updateVignette(visible: boolean): void {
-    if (visible) {
+    // FASE H — respect vignette setting; if disabled, always hide
+    const vignetteEnabled = SaveManager.load().settings.vignette;
+    if (visible && vignetteEnabled) {
       this.vignetteRect.setVisible(true);
       if (!this.vignetteTween || !this.vignetteTween.isPlaying()) {
         this.vignetteTween = this.tweens.add({
@@ -556,7 +632,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnBoss(): void {
-    // Only spawn CEO when there is no active miniboss (boss:spawned is also emitted by miniboss init)
+    // Minibosses también emiten 'boss:spawned' (reusan la barra del HUD) DENTRO de su constructor,
+    // antes de que `this.miniboss` quede asignado → guard por oleada: el CEO solo aparece en la
+    // oleada del jefe final, nunca en las de miniboss (5/9/12).
+    if (this.ctx.wave < WAVES.BOSS_WAVE) return;
     if (this.miniboss?.alive) return;
     if (this.boss) return;
     this.enemySys.killAll();

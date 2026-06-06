@@ -198,51 +198,57 @@ export class MainMenuScene extends Phaser.Scene {
     back.on('pointerup', () => { this.audio.playBeep('click', 'ui'); overlay.destroy(true); });
   }
 
+  // ─── CONFIGURACIÓN (audio + display/accesibilidad) ───────────────────────
   private showAudioConfig(): void {
     const cx = GAME.WIDTH / 2;
     const cy = GAME.HEIGHT / 2;
 
-    // Overlay panel
-    const overlay = this.add.container(0, 0);
-    const bg = this.add.rectangle(cx, cy, 360, 280, 0x111122, 0.95)
+    // Panel: taller to accommodate all controls (3 audio sliders + 6 display controls)
+    const PANEL_H = 500;
+    const overlay = this.add.container(0, 0).setDepth(200);
+    const bg = this.add.rectangle(cx, cy, 400, PANEL_H, 0x111122, 0.97)
       .setStrokeStyle(2, 0x4444aa)
       .setInteractive(); // block clicks
     overlay.add(bg);
 
-    const titleText = this.add.text(cx, cy - 110, 'CONFIGURACIÓN DE AUDIO', {
+    const titleText = this.add.text(cx, cy - PANEL_H / 2 + 18, 'CONFIGURACIÓN', {
       fontSize: '18px', color: '#ffffff', fontStyle: 'bold',
     }).setOrigin(0.5);
     overlay.add(titleText);
 
-    const categories: Array<{ label: string; cat: 'music' | 'sfx' | 'ui' }> = [
+    let rowY = cy - PANEL_H / 2 + 50;
+    const sliderW = 180;
+    const labelX = cx - 140;
+    const controlX = cx + 30;
+
+    // ── Section: Audio ───────────────────────────────────────────────────────
+    overlay.add(this.add.text(cx, rowY, '— AUDIO —', { fontSize: '12px', color: '#8888cc' }).setOrigin(0.5));
+    rowY += 20;
+
+    const audioCats: Array<{ label: string; cat: 'music' | 'sfx' | 'ui' }> = [
       { label: 'Música', cat: 'music' },
       { label: 'Efectos', cat: 'sfx' },
       { label: 'UI', cat: 'ui' },
     ];
 
-    let rowY = cy - 60;
-    const sliderW = 200;
+    for (const { label, cat } of audioCats) {
+      overlay.add(this.add.text(labelX, rowY, label, { fontSize: '13px', color: '#cccccc' }).setOrigin(0, 0.5));
 
-    for (const { label, cat } of categories) {
-      const lbl = this.add.text(cx - 120, rowY, label, { fontSize: '14px', color: '#cccccc' }).setOrigin(0, 0.5);
-      overlay.add(lbl);
-
-      const trackBg = this.add.rectangle(cx + 20, rowY, sliderW, 8, 0x333366);
+      const trackBg = this.add.rectangle(controlX, rowY, sliderW, 8, 0x333366);
       overlay.add(trackBg);
 
       const currentVol = this.audio.getVolume(cat);
       const fillW = Math.max(4, currentVol * sliderW);
-      const fill = this.add.rectangle(cx + 20 - sliderW / 2 + fillW / 2, rowY, fillW, 8, 0x6666ff);
+      const fill = this.add.rectangle(controlX - sliderW / 2 + fillW / 2, rowY, fillW, 8, 0x6666ff);
       overlay.add(fill);
 
-      const handle = this.add.rectangle(cx + 20 - sliderW / 2 + currentVol * sliderW, rowY, 12, 20, 0xaaaaff)
+      const handle = this.add.rectangle(controlX - sliderW / 2 + currentVol * sliderW, rowY, 12, 20, 0xaaaaff)
         .setInteractive({ useHandCursor: true, draggable: true });
       overlay.add(handle);
-
       this.input.setDraggable(handle);
-      const trackLeft = cx + 20 - sliderW / 2;
-      const trackRight = cx + 20 + sliderW / 2;
 
+      const trackLeft = controlX - sliderW / 2;
+      const trackRight = controlX + sliderW / 2;
       handle.on('drag', (_ptr: Phaser.Input.Pointer, dragX: number) => {
         const clampedX = Phaser.Math.Clamp(dragX, trackLeft, trackRight);
         handle.setX(clampedX);
@@ -250,21 +256,177 @@ export class MainMenuScene extends Phaser.Scene {
         this.audio.setVolume(cat, vol);
         const newFillW = Math.max(4, vol * sliderW);
         fill.setPosition(trackLeft + newFillW / 2, rowY).setSize(newFillW, 8);
-        // Persist audio settings on change (per-spec: save on audio settings change)
         const s = SaveManager.load();
         s.settings[cat === 'music' ? 'musicVolume' : cat === 'sfx' ? 'sfxVolume' : 'uiVolume'] = vol;
         SaveManager.save(s);
       });
 
-      rowY += 52;
+      rowY += 44;
     }
 
+    // ── Section: Pantalla ────────────────────────────────────────────────────
+    overlay.add(this.add.text(cx, rowY + 2, '— PANTALLA —', { fontSize: '12px', color: '#8888cc' }).setOrigin(0.5));
+    rowY += 22;
+
+    // Helper: small toggle button (returns the label text for live update)
+    const makeToggle = (
+      x: number, y: number, labelOn: string, labelOff: string, current: boolean,
+      onChange: (v: boolean) => void,
+    ): void => {
+      let state = current;
+      const btn = this.add.rectangle(x, y, 100, 24, state ? 0x2255cc : 0x333355)
+        .setStrokeStyle(1, 0x5555aa)
+        .setInteractive({ useHandCursor: true });
+      overlay.add(btn);
+      const lbl = this.add.text(x, y, state ? labelOn : labelOff, { fontSize: '11px', color: '#ffffff' }).setOrigin(0.5);
+      overlay.add(lbl);
+      btn.on('pointerup', () => {
+        state = !state;
+        btn.setFillStyle(state ? 0x2255cc : 0x333355);
+        lbl.setText(state ? labelOn : labelOff);
+        onChange(state);
+      });
+      btn.on('pointerover', () => btn.setStrokeStyle(2, 0xaaaaff));
+      btn.on('pointerout', () => btn.setStrokeStyle(1, 0x5555aa));
+    };
+
+    // Helper: small horizontal selector (Auto/×1/×2/×3)
+    const makeZoomSelector = (x: number, y: number, current: number, onChange: (v: number) => void): void => {
+      const options: Array<{ label: string; value: number }> = [
+        { label: 'Auto', value: 0 },
+        { label: '×1', value: 1 },
+        { label: '×2', value: 2 },
+        { label: '×3', value: 3 },
+      ];
+      let selected = current;
+      const btnW = 40;
+      const gap = 4;
+      const totalW = options.length * btnW + (options.length - 1) * gap;
+      const startX = x - totalW / 2 + btnW / 2;
+
+      options.forEach((opt, i) => {
+        const bx = startX + i * (btnW + gap);
+        const btn = this.add.rectangle(bx, y, btnW, 24, opt.value === selected ? 0x2255cc : 0x333355)
+          .setStrokeStyle(1, 0x5555aa)
+          .setInteractive({ useHandCursor: true });
+        overlay.add(btn);
+        overlay.add(this.add.text(bx, y, opt.label, { fontSize: '11px', color: '#ffffff' }).setOrigin(0.5));
+        btn.on('pointerup', () => {
+          if (selected === opt.value) return;
+          selected = opt.value;
+          onChange(selected);
+          // Recolor all buttons
+          overlay.getAll().forEach(obj => {
+            if (obj instanceof Phaser.GameObjects.Rectangle) {
+              options.forEach((o, j) => {
+                const bxj = startX + j * (btnW + gap);
+                if (Math.abs(obj.x - bxj) < 2 && Math.abs(obj.y - y) < 2) {
+                  obj.setFillStyle(o.value === selected ? 0x2255cc : 0x333355);
+                }
+              });
+            }
+          });
+        });
+        btn.on('pointerover', () => btn.setStrokeStyle(2, 0xaaaaff));
+        btn.on('pointerout', () => btn.setStrokeStyle(1, 0x5555aa));
+      });
+    };
+
+    const displayRow = (labelText: string, controlFn: (cy2: number) => void): void => {
+      overlay.add(this.add.text(labelX, rowY, labelText, { fontSize: '13px', color: '#cccccc' }).setOrigin(0, 0.5));
+      controlFn(rowY);
+      rowY += 38;
+    };
+
+    const save0 = SaveManager.load();
+
+    // Pantalla completa
+    displayRow('Pantalla completa', (y) => {
+      makeToggle(controlX + 10, y, 'ON', 'OFF', save0.settings.fullscreen, (v) => {
+        const s = SaveManager.load();
+        s.settings.fullscreen = v;
+        SaveManager.save(s);
+        this.scale.toggleFullscreen();
+      });
+    });
+
+    // Zoom
+    displayRow('Zoom', (y) => {
+      makeZoomSelector(controlX + 20, y, save0.settings.zoom, (v) => {
+        const s = SaveManager.load();
+        s.settings.zoom = v;
+        SaveManager.save(s);
+      });
+    });
+
+    // Nitidez (smoothing — applies on restart)
+    displayRow('Nitidez', (y) => {
+      makeToggle(controlX + 10, y, 'Suavizado', 'Pixel art', save0.settings.smoothing, (v) => {
+        const s = SaveManager.load();
+        s.settings.smoothing = v;
+        SaveManager.save(s);
+      });
+      // Note "se aplica al reiniciar"
+      overlay.add(this.add.text(cx + 65, y, '(se aplica al reiniciar)', {
+        fontSize: '9px', color: '#aaaaaa',
+      }).setOrigin(0, 0.5));
+    });
+
+    // Sacudida de pantalla (slider 0–100%)
+    displayRow('Sacudida', (y) => {
+      const currentShake = save0.settings.screenShake;
+      const shakeFillW = Math.max(4, currentShake * sliderW);
+      const trackBg2 = this.add.rectangle(controlX, y, sliderW, 8, 0x333366);
+      overlay.add(trackBg2);
+      const shakeFill = this.add.rectangle(controlX - sliderW / 2 + shakeFillW / 2, y, shakeFillW, 8, 0x6666ff);
+      overlay.add(shakeFill);
+      const shakeHandle = this.add.rectangle(controlX - sliderW / 2 + currentShake * sliderW, y, 12, 20, 0xaaaaff)
+        .setInteractive({ useHandCursor: true, draggable: true });
+      overlay.add(shakeHandle);
+      this.input.setDraggable(shakeHandle);
+      const tLeft = controlX - sliderW / 2;
+      const tRight = controlX + sliderW / 2;
+      const shakePct = this.add.text(controlX + sliderW / 2 + 8, y, `${Math.round(currentShake * 100)}%`, {
+        fontSize: '11px', color: '#cccccc',
+      }).setOrigin(0, 0.5);
+      overlay.add(shakePct);
+      shakeHandle.on('drag', (_ptr: Phaser.Input.Pointer, dragX: number) => {
+        const clampedX = Phaser.Math.Clamp(dragX, tLeft, tRight);
+        shakeHandle.setX(clampedX);
+        const val = (clampedX - tLeft) / sliderW;
+        const newFillW2 = Math.max(4, val * sliderW);
+        shakeFill.setPosition(tLeft + newFillW2 / 2, y).setSize(newFillW2, 8);
+        shakePct.setText(`${Math.round(val * 100)}%`);
+        const s = SaveManager.load();
+        s.settings.screenShake = val;
+        SaveManager.save(s);
+      });
+    });
+
+    // Viñeta de estrés
+    displayRow('Viñeta de estrés', (y) => {
+      makeToggle(controlX + 10, y, 'ON', 'OFF', save0.settings.vignette, (v) => {
+        const s = SaveManager.load();
+        s.settings.vignette = v;
+        SaveManager.save(s);
+      });
+    });
+
+    // Números de daño
+    displayRow('Números de daño', (y) => {
+      makeToggle(controlX + 10, y, 'ON', 'OFF', save0.settings.damageNumbers, (v) => {
+        const s = SaveManager.load();
+        s.settings.damageNumbers = v;
+        SaveManager.save(s);
+      });
+    });
+
     // Close button
-    const closeBtn = this.add.rectangle(cx, cy + 110, 140, 38, COLORS.BUTTON)
+    const closeBtnY = cy + PANEL_H / 2 - 22;
+    const closeBtn = this.add.rectangle(cx, closeBtnY, 140, 34, COLORS.BUTTON)
       .setInteractive({ useHandCursor: true });
     overlay.add(closeBtn);
-    const closeLbl = this.add.text(cx, cy + 110, 'CERRAR', { fontSize: '16px', color: COLORS.TEXT }).setOrigin(0.5);
-    overlay.add(closeLbl);
+    overlay.add(this.add.text(cx, closeBtnY, 'CERRAR', { fontSize: '15px', color: COLORS.TEXT }).setOrigin(0.5));
     closeBtn.on('pointerover', () => closeBtn.setFillStyle(COLORS.BUTTON_HOVER));
     closeBtn.on('pointerout', () => closeBtn.setFillStyle(COLORS.BUTTON));
     closeBtn.on('pointerup', () => {

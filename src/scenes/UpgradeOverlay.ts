@@ -65,13 +65,17 @@ export class UpgradeOverlay extends Phaser.Scene {
     // Semi-transparent overlay
     this.add.rectangle(cx, GAME.HEIGHT / 2, GAME.WIDTH, GAME.HEIGHT, 0x000000, 0.75);
 
-    this.add.text(cx, 30, `SUBISTE A NIVEL ${this.ctx.player.level}`, {
-      fontSize: '26px', color: '#ffff00', fontStyle: 'bold',
-    }).setOrigin(0.5);
+    // Opaque top strip to cover HUD timer/wave text (Ticket 3.3)
+    this.add.rectangle(cx, 20, GAME.WIDTH, 40, 0x000000, 1).setDepth(9);
 
-    this.add.text(cx, 60, 'Elige una mejora de personaje:', {
+    // Title and subtitle pushed below HUD strip (Ticket 3.3 — era y:30/60)
+    this.add.text(cx, 50, `SUBISTE A NIVEL ${this.ctx.player.level}`, {
+      fontSize: '26px', color: '#ffff00', fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(10);
+
+    this.add.text(cx, 82, 'Elige una mejora de personaje:', {
       fontSize: '15px', color: COLORS.TEXT,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(10);
 
     const options = pickPlayerUpgrades(this.optionCount);
 
@@ -82,7 +86,7 @@ export class UpgradeOverlay extends Phaser.Scene {
 
     const cardW = 148;
     const cardH = 130;
-    const cardsCY = 96 + cardH / 2;
+    const cardsCY = 116 + cardH / 2;  // era 96 — shifted down to clear HUD strip (Ticket 3.3)
     const totalW = options.length * cardW + (options.length - 1) * CARD_GAP;
     const startX = cx - totalW / 2;
 
@@ -161,14 +165,18 @@ export class UpgradeOverlay extends Phaser.Scene {
     // Semi-transparent overlay
     this.add.rectangle(cx, cy, GAME.WIDTH, GAME.HEIGHT, 0x000000, 0.75);
 
-    const title = this.weaponsOnly ? 'ELIGE TU ARMA INICIAL' : `SUBISTE A NIVEL ${this.ctx.player.level}`;
-    this.add.text(cx, 30, title, {
-      fontSize: '26px', color: '#ffff00', fontStyle: 'bold',
-    }).setOrigin(0.5);
+    // Opaque top strip to cover HUD timer/wave text (Ticket 3.3)
+    this.add.rectangle(cx, 20, GAME.WIDTH, 40, 0x000000, 1).setDepth(9);
 
-    this.add.text(cx, 60, this.weaponsOnly ? 'Con qué empiezas:' : 'Elige una mejora:', {
+    const title = this.weaponsOnly ? 'ELIGE TU ARMA INICIAL' : `SUBISTE A NIVEL ${this.ctx.player.level}`;
+    // Title and subtitle pushed below HUD strip (Ticket 3.3 — era y:30/60)
+    this.add.text(cx, 50, title, {
+      fontSize: '26px', color: '#ffff00', fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(10);
+
+    this.add.text(cx, 82, this.weaponsOnly ? 'Con qué empiezas:' : 'Elige una mejora:', {
       fontSize: '15px', color: COLORS.TEXT,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(10);
 
     const pool = new UpgradePool();
     const forbidHighRarity = this.weaponsOnly || (this.ctx.character.noEpicLegendaryWeapons ?? false);
@@ -199,7 +207,7 @@ export class UpgradeOverlay extends Phaser.Scene {
     const cardH = 16 + iconSize + TEXT_BLOCK;
     const wrapW = cardW - 12;
     const top = -cardH / 2;
-    const cardsCY = 96 + cardH / 2;
+    const cardsCY = 116 + cardH / 2;  // era 96 — shifted down to clear HUD strip (Ticket 3.3)
     const totalW = options.length * cardW + (options.length - 1) * CARD_GAP;
     const startX = cx - totalW / 2 + cardW / 2;
 

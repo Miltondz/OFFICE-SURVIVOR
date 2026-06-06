@@ -16,24 +16,24 @@ export interface PlayerUpgrade {
 
 // All multiplier constants live here — config over code.
 const UP = {
-  HP_AMOUNT: 20,
-  DAMAGE_MULT: 1.12,
-  SPEED_MULT: 1.08,
+  HP_AMOUNT: 12,                 // era 20 — reducido ~40%; mejoras son acumulables, deben sentirse incrementales (balance v2)
+  DAMAGE_MULT: 1.06,             // era 1.12 — stackeable; pasos más pequeños (balance v2)
+  SPEED_MULT: 1.04,              // era 1.08 — stackeable; pasos más pequeños (balance v2)
   PROJECTILE_BONUS: 1,
-  FIRERATE_MULT: 1.10,
-  RANGE_MULT: 1.15,
-  CRIT_BONUS: 0.08,
-  DAMAGE_TAKEN_MULT: 1 - 0.12,   // −12% damage taken (i.e. 0.88)
-  XP_MULT: 1.20,
+  FIRERATE_MULT: 1.05,           // era 1.10 — stackeable; pasos más pequeños (balance v2)
+  RANGE_MULT: 1.08,              // era 1.15 — stackeable; pasos más pequeños (balance v2)
+  CRIT_BONUS: 0.04,              // era 0.08 — stackeable; pasos más pequeños (balance v2)
+  DAMAGE_TAKEN_MULT: 1 - 0.06,  // era 1-0.12 (0.88) — −6% daño recibido; pasos más pequeños (balance v2)
+  XP_MULT: 1.10,                 // era 1.20 — stackeable; pasos más pequeños (balance v2)
   REGEN_HP_PER_S: 1,             // HP healed per second (tracked via RunModifiers.regenHpPerS)
-  STRESS_RISE_MULT: 1 - 0.15,   // −15% stress accrual
-  PICKUP_RANGE_BONUS: 30,        // extra px pickup radius (tracked via RunModifiers.pickupRange)
+  STRESS_RISE_MULT: 1 - 0.08,   // era 1-0.15 (0.85) — −8% subida de estrés; pasos más pequeños (balance v2)
+  PICKUP_RANGE_BONUS: 18,        // era 30 — stackeable; pasos más pequeños (balance v2)
 } as const;
 
 export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   {
     id: 'stat_hp',
-    name: '+20 HP máx',
+    name: '+12 HP máx',
     desc: `Aumenta tu HP máximo en ${UP.HP_AMOUNT} y cura ${UP.HP_AMOUNT} HP al instante.`,
     weight: 3,
     apply(player) {
@@ -43,8 +43,8 @@ export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   },
   {
     id: 'stat_damage',
-    name: '+12% daño',
-    desc: 'Todos tus ataques hacen 12% más daño.',
+    name: '+6% daño',
+    desc: 'Todos tus ataques hacen 6% más daño.',
     weight: 3,
     apply(_player, mods) {
       mods.damageMult *= UP.DAMAGE_MULT;
@@ -52,8 +52,8 @@ export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   },
   {
     id: 'stat_speed',
-    name: '+8% velocidad',
-    desc: 'Te mueves un 8% más rápido.',
+    name: '+4% velocidad',
+    desc: 'Te mueves un 4% más rápido.',
     weight: 2,
     apply(player) {
       player.speed *= UP.SPEED_MULT;
@@ -70,8 +70,8 @@ export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   },
   {
     id: 'stat_firerate',
-    name: '+10% cadencia',
-    desc: 'Todas tus armas disparan un 10% más rápido.',
+    name: '+5% cadencia',
+    desc: 'Todas tus armas disparan un 5% más rápido.',
     weight: 2,
     apply(_player, mods) {
       // Stored in modifiers as a firerate multiplier (systems read mods.fireRateMult).
@@ -80,8 +80,8 @@ export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   },
   {
     id: 'stat_range',
-    name: '+15% alcance',
-    desc: 'Tus armas tienen un 15% más de alcance.',
+    name: '+8% alcance',
+    desc: 'Tus armas tienen un 8% más de alcance.',
     weight: 1.5,
     apply(_player, mods) {
       mods.rangeMult *= UP.RANGE_MULT;
@@ -89,8 +89,8 @@ export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   },
   {
     id: 'stat_crit',
-    name: '+8% prob. crítico',
-    desc: 'Aumenta tu probabilidad de golpe crítico en 8 puntos.',
+    name: '+4% prob. crítico',
+    desc: 'Aumenta tu probabilidad de golpe crítico en 4 puntos.',
     weight: 1.5,
     apply(_player, mods) {
       mods.critBonus = (mods.critBonus ?? 0) + UP.CRIT_BONUS;
@@ -98,8 +98,8 @@ export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   },
   {
     id: 'stat_armor',
-    name: '−12% daño recibido',
-    desc: 'Reduces todo el daño que recibes en un 12%.',
+    name: '−6% daño recibido',
+    desc: 'Reduces todo el daño que recibes en un 6%.',
     weight: 2,
     apply(_player, mods) {
       mods.damageTakenMult *= UP.DAMAGE_TAKEN_MULT;
@@ -107,8 +107,8 @@ export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   },
   {
     id: 'stat_xp',
-    name: '+20% XP',
-    desc: 'Ganas un 20% más de XP por cada enemigo eliminado.',
+    name: '+10% XP',
+    desc: 'Ganas un 10% más de XP por cada enemigo eliminado.',
     weight: 1,
     apply(_player, mods) {
       mods.xpMult *= UP.XP_MULT;
@@ -125,8 +125,8 @@ export const PLAYER_UPGRADES: PlayerUpgrade[] = [
   },
   {
     id: 'stat_stress_resist',
-    name: '−15% subida de estrés',
-    desc: 'El estrés aumenta un 15% más despacio.',
+    name: '−8% subida de estrés',
+    desc: 'El estrés aumenta un 8% más despacio.',
     weight: 1.5,
     apply(_player, mods) {
       mods.stressRiseMult = (mods.stressRiseMult ?? 1) * UP.STRESS_RISE_MULT;

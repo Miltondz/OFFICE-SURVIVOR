@@ -379,6 +379,15 @@ Phaser no carga SVG como spritesheet directo. Recomendado para enemigos/miniboss
 - Mantener el patrón actual: si `textures.exists('enemysheet_<id>')` usa sprite; si no, placeholder.
 - Los minibosses: placeholder grande con color propio + etiqueta, hasta generar las hojas (prompts ya en la spec).
 
+## Backlog de balance (de la auditoría — diferido a un pase de balance)
+- **cronometro_bala** ralentiza también al jugador (usa `time.timeScale` global sin compensar `player.speed`). Debería: el jugador se mueve normal durante los 5s. Compensar velocidad del player ×(1/CRONO_TIME_SCALE) mientras dura.
+- **swarm** solo genera `angry_email` (único enemigo con hp ≤ `SWARM_HP_THRESHOLD 30`). Añadir enemigos chicos (Fase F) o subir el umbral para avalanchas variadas.
+- **Bonus (W4)**: los enemigos dorados aún dan XP y pueden soltar ítem/upgrade. Diseño: "solo monedas ×2". Gatear XP y drops para enemigos `isBonus`.
+- **CEO (W13)** no emite `wave:announce` (va por el gate de jefe en `beginNextWave`, no `beginWave`) → sin banner "OLEADA"/boss. La barra de jefe sí aparece. Emitir announce si se quiere banner.
+- **rebote_de_pared**: presupuesto total = 2 (1 base + fotocopiadora). Spec pedía "hasta 3". Subir `ITEMS_E2.REBOTE_BASE_BUDGET` a 2 si se desea.
+- **explosion_al_matar**: daño fijo (~75) porque `EnemyKilledPayload` no lleva el maxHp del élite. Para daño proporcional real, añadir `maxHp` al payload.
+- Código muerto inofensivo: `ScreenShake.setIntensityMult`, `DamageNumbers.setEnabled` (setters live no usados).
+
 ## Backlog / notas (no en estas fases, pendiente futuro)
 - **Mejorar la IA de los enemigos.** Hoy todos hacen lo mismo: persiguen al jugador en línea recta
   (`Enemy.preUpdate`: ángulo directo + `setVelocity`). Falta variedad/comportamiento por tipo, p.ej.:

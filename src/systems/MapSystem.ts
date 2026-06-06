@@ -43,8 +43,9 @@ export class MapSystem {
   }
 
   init(): void {
-    const solid = this.scene.physics.add.staticGroup();   // blocks player AND enemies
-    const plants = this.scene.physics.add.staticGroup();  // blocks enemies only
+    const solid = this.scene.physics.add.staticGroup();       // blocks player AND enemies
+    const plants = this.scene.physics.add.staticGroup();      // was enemies only; now also player (balance v2)
+    const coffeeGroup = this.scene.physics.add.staticGroup(); // coffee machine collider group (balance v2)
     const extintores = this.scene.physics.add.staticGroup();
 
     const spawnX = MAP.PLAYER_SPAWN_X;
@@ -97,6 +98,7 @@ export class MapSystem {
     if (!this.addProp('coffee', coffeeX, coffeeY, coffee)) {
       this.scene.add.text(coffeeX, coffeeY, '☕', { fontSize: '20px' }).setOrigin(0.5).setDepth(2);
     }
+    coffeeGroup.add(coffee); // static body created here; coffee machine now blocks player+enemies (balance v2)
     this.addSteam(coffeeX, coffeeY - 22);   // vaho en bucle sobre la cafetera
 
     // Vending machine: lower-right quadrant.
@@ -123,10 +125,14 @@ export class MapSystem {
       extintores.add(e);
     }
 
-    // Colliders: player + enemies blocked by solid; enemies also blocked by plants & extintores.
+    // Colliders: player + enemies blocked by solid; player + enemies also blocked by plants &
+    // coffee machine (coffee was previously enemies-only via plants; now also stops the player).
     this.scene.physics.add.collider(this.player.body, solid);
     this.scene.physics.add.collider(this.enemySys.enemyPool, solid);
     this.scene.physics.add.collider(this.enemySys.enemyPool, plants);
+    this.scene.physics.add.collider(this.player.body, plants);        // plants now block player too (balance v2)
+    this.scene.physics.add.collider(this.player.body, coffeeGroup);   // coffee machine blocks player (balance v2)
+    this.scene.physics.add.collider(this.enemySys.enemyPool, coffeeGroup); // coffee machine blocks enemies too
     this.scene.physics.add.collider(this.player.body, extintores);
     this.scene.physics.add.collider(this.enemySys.enemyPool, extintores);
 

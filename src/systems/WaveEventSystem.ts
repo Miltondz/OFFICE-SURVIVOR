@@ -32,8 +32,9 @@ export class WaveEventSystem {
   private allHandsTimer = 0;
   private printerJamTimer = 0;
   private blackoutTimer = 0;
-  private blackoutRect: Phaser.GameObjects.Rectangle | null = null;
-  private blackoutMaskShape: Phaser.GameObjects.Graphics | null = null;
+  // Ticket 3.4 — radial gradient replaces hard-masked rect
+  private blackoutSprite: Phaser.GameObjects.Image | null = null;
+  private static readonly BLACKOUT_TEXTURE_KEY = 'blackout_radial_gradient';
 
   constructor(
     scene: Phaser.Scene, ctx: RunContext, enemySys: EnemySystem,
@@ -113,36 +114,66 @@ export class WaveEventSystem {
     }
     if (this.blackoutTimer > 0) {
       this.blackoutTimer -= delta;
-      this.drawBlackoutMask();
+      this.updateBlackoutPosition();
       if (this.blackoutTimer <= 0) this.endBlackout();
     }
   }
 
-  private startBlackout(): void {
-    if (!this.blackoutRect) {
-      this.blackoutRect = this.scene.add.rectangle(
-        GAME.WIDTH / 2, GAME.HEIGHT / 2, GAME.WIDTH, GAME.HEIGHT, 0x000000, WAVE_EVENTS.BLACKOUT_ALPHA,
-      ).setScrollFactor(0).setDepth(45);
-      this.blackoutMaskShape = this.scene.make.graphics({});
-      const mask = this.blackoutMaskShape.createGeometryMask();
-      mask.invertAlpha = true; // dark everywhere EXCEPT the circle around the player
-      this.blackoutRect.setMask(mask);
-    }
-    this.blackoutRect.setVisible(true);
-    this.blackoutTimer = WAVE_EVENTS.BLACKOUT_MS;
-    this.drawBlackoutMask();
+  /** Build (once) a canvas texture with a radial gradient: transparent center → black edges. */
+  private ensureBlackoutTexture(): void {
+    const key = WaveEventSystem.BLACKOUT_TEXTURE_KEY;
+    if (this.scene.textures.exists(key)) return;
+
+    const W = GAME.WIDTH;
+    const H = GAME.HEIGHT;
+    // Diagonal half-length — ensures gradient covers full screen corners.
+    const outerR = Math.ceil(Math.sqrt(W * W + H * H) / 2);
+    const innerR = WAVE_EVENTS.BLACKOUT_RADIUS;
+
+    const canvasTex = this.scene.textures.createCanvas(key, W, H);
+    if (!canvasTex) return;
+    const ctx2d = canvasTex.getSourceImage() as HTMLCanvasElement;
+    const ctx = ctx2d.getContext('2d');
+    if (!ctx) return;
+
+    // Center of the canvas (texture is always W×H, centered on player via image position)
+    const cx = W / 2;
+    const cy = H / 2;
+
+    const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, `rgba(0,0,0,${WAVE_EVENTS.BLACKOUT_ALPHA})`);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    canvasTex.refresh();
   }
 
-  private drawBlackoutMask(): void {
-    if (!this.blackoutMaskShape) return;
-    this.blackoutMaskShape.clear();
-    this.blackoutMaskShape.fillStyle(0xffffff);
-    this.blackoutMaskShape.fillCircle(this.player.x, this.player.y, WAVE_EVENTS.BLACKOUT_RADIUS);
+  private startBlackout(): void {
+    this.ensureBlackoutTexture();
+    if (!this.blackoutSprite) {
+      this.blackoutSprite = this.scene.add.image(0, 0, WaveEventSystem.BLACKOUT_TEXTURE_KEY)
+        .setScrollFactor(0)
+        .setDepth(45)
+        .setOrigin(0.5);
+    }
+    this.blackoutSprite.setVisible(true);
+    this.blackoutTimer = WAVE_EVENTS.BLACKOUT_MS;
+    this.updateBlackoutPosition();
+  }
+
+  /** Each frame: keep the radial gradient centered on the player's screen position. */
+  private updateBlackoutPosition(): void {
+    if (!this.blackoutSprite) return;
+    const cam = this.scene.cameras.main;
+    // Convert world coords to screen coords
+    const sx = (this.player.x - cam.scrollX) * cam.zoom;
+    const sy = (this.player.y - cam.scrollY) * cam.zoom;
+    this.blackoutSprite.setPosition(sx, sy);
   }
 
   private endBlackout(): void {
-    this.blackoutRect?.setVisible(false);
-    this.blackoutMaskShape?.clear();
+    this.blackoutSprite?.setVisible(false);
   }
 
   private edgePos(): { x: number; y: number } {

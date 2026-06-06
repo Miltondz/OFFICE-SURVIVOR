@@ -3,7 +3,7 @@ import { AUDIO } from '@/config/game.config';
 import type { SaveData, RunStats } from '@/types';
 
 const SAVE_KEY = 'office_survivor_save';
-const CURRENT_VERSION = 2; // was implicitly 1; bumped for coins, bestKillsInRun, settings
+const CURRENT_VERSION = 3; // v2→v3: added display/accessibility settings (FASE H)
 
 const DEFAULTS: SaveData = {
   saveVersion: CURRENT_VERSION,
@@ -21,6 +21,13 @@ const DEFAULTS: SaveData = {
     musicVolume: AUDIO.DEFAULTS.music,
     sfxVolume: AUDIO.DEFAULTS.sfx,
     uiVolume: AUDIO.DEFAULTS.ui,
+    // FASE H defaults
+    fullscreen: false,
+    zoom: 0,          // 0 = auto/FIT
+    smoothing: false, // pixel art by default
+    screenShake: 1,   // full intensity
+    vignette: true,
+    damageNumbers: true,
   },
 };
 
@@ -56,13 +63,24 @@ export class SaveManager {
     }
   }
 
-  /** Migrate v1 save (missing coins, bestKillsInRun, settings) to v2. */
+  /** Migrate saves from older versions. */
   static migrate(data: Partial<SaveData>): Partial<SaveData> {
     const d = { ...data };
-    // v1 → v2: ensure new fields exist
+    // v1 → v2: ensure coins, bestKillsInRun, and settings exist
     if ((d.saveVersion ?? 0) < 2) {
       if (d.coins === undefined) d.coins = 0;
       if (d.bestKillsInRun === undefined) d.bestKillsInRun = 0;
+      if (d.settings === undefined) {
+        d.settings = { ...DEFAULTS.settings };
+      } else {
+        d.settings = { ...DEFAULTS.settings, ...d.settings };
+      }
+      // fall through to v2→v3 below
+    }
+    // v2 → v3: merge new display/accessibility settings (FASE H)
+    if ((d.saveVersion ?? 0) < 3) {
+      // The deep-merge in load() with {...DEFAULTS.settings, ...d.settings} already backfills
+      // missing keys, so we just ensure the settings object exists here.
       if (d.settings === undefined) {
         d.settings = { ...DEFAULTS.settings };
       } else {

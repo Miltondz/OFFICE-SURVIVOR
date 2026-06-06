@@ -1,5 +1,5 @@
 import type { ItemDefinition, WeaponDefinition, RunModifiers, PlayerState } from '@/types';
-import { COMBAT, ITEMS_E1 } from './game.config';
+import { COMBAT, ITEMS_E1, ITEMS_E2 } from './game.config';
 
 // ─── WEAPONS (10) ──────────────────────────────────────────────────────────
 
@@ -714,7 +714,115 @@ export const ITEMS: ItemDefinition[] = [
     // Reactive: hook enemy:killed isElite → enemySys.damageInRadius — nuevo (fase E1)
   },
 
-  // ── §E1 NUEVOS LEGENDARIOS (2) ──────────────────────────────────────────
+  // ── §E2 NUEVOS COMUNES (1) ──────────────────────────────────────────────────
+
+  {
+    id: 'cable_trampa',
+    name: 'Cable Trampa',
+    description: 'Cuando un enemigo entra en 80px, lo aturde 0.8s. Cooldown 3s.',
+    rarity: 'common',
+    category: 'passive',
+    tags: ['trampa', 'control'],
+    // Update loop en GameScene/EnemySystem: si owned + cooldown listo → applyEffect stun — nuevo (fase E2)
+  },
+
+  // ── §E2 NUEVOS RAROS (2) ────────────────────────────────────────────────────
+
+  {
+    id: 'rebote_de_pared',
+    name: 'Rebote de Pared',
+    description: 'Los proyectiles rebotan en los bordes del mapa una vez. Con Fotocopiadora: hasta 3 veces.',
+    rarity: 'rare',
+    category: 'passive',
+    tags: ['proyectiles', 'mapa'],
+    synergyWith: ['fotocopiadora'],
+    maxStack: 1,
+    applyModifiers: (m: RunModifiers) => {
+      m.wallBounce += ITEMS_E2.REBOTE_BASE_BUDGET;  // nuevo (fase E2)
+    },
+  },
+  {
+    id: 'cronometro_bala',
+    name: 'Cronómetro Bala',
+    description: 'Una vez por run: al bajar al 30% HP, el tiempo se ralentiza al 30% durante 5s mientras tú te mueves normal.',
+    rarity: 'rare',
+    category: 'passive',
+    tags: ['utilidad', 'tiempo'],
+    maxStack: 1,
+    // Triggered in Player.takeDamage: first time hp ≤ 30% — nuevo (fase E2)
+  },
+
+  // ── §E2 NUEVOS ÉPICOS (4) ───────────────────────────────────────────────────
+
+  {
+    id: 'magnetismo_balas',
+    name: 'Magnetismo de Balas',
+    description: 'Tus proyectiles se curvan suavemente hacia el enemigo más cercano.',
+    rarity: 'epic',
+    category: 'passive',
+    tags: ['proyectiles', 'precisión'],
+    synergyWith: ['wifi_rapido'],
+    maxStack: 1,
+    // Steering en Projectile.preUpdate cuando item owned — nuevo (fase E2)
+  },
+  {
+    id: 'segundo_corazon',
+    name: 'Segundo Corazón',
+    description: 'Un 2º depósito de 50 HP oculto. La primera vez que llegas a 0 HP, en vez de morir, se activa con 50 HP.',
+    rarity: 'epic',
+    category: 'passive',
+    tags: ['defensa', 'hp'],
+    synergyWith: ['linea_directa'],
+    maxStack: 1,
+    // ctx.secondHeartUsed / ctx.secondHeartHp; manejado en Player.takeDamage — nuevo (fase E2)
+  },
+  {
+    id: 'teletransporte',
+    name: 'Teletransporte',
+    description: 'Cuando HP ≤ 25%: te teletransportas a una posición aleatoria del mapa. Cooldown 30s.',
+    rarity: 'epic',
+    category: 'passive',
+    tags: ['defensa', 'movilidad'],
+    synergyWith: ['modo_avion'],
+    maxStack: 1,
+    // Manejado en Player.takeDamage después de aplicar daño — nuevo (fase E2)
+  },
+  {
+    id: 'fotocopiadora_armas',
+    name: 'Fotocopiadora de Armas',
+    description: 'Una vez por run: al adquirir, duplica el arma con más kills (añade una segunda instancia).',
+    rarity: 'epic',
+    category: 'passive',
+    tags: ['arma', 'duplicar'],
+    synergyWith: ['benchmark'],
+    maxStack: 1,
+    // On pickup en ItemReactions: si !ctx.fotocopiadoraArmasUsed → duplicar arma top-kills — nuevo (fase E2)
+  },
+
+  // ── §E2 NUEVOS LEGENDARIOS (2) ──────────────────────────────────────────────
+
+  {
+    id: 'avalancha',
+    name: 'Avalancha',
+    description: 'Al impactar un enemigo, genera un proyectil secundario con 50% de daño hacia el enemigo más cercano.',
+    rarity: 'legendary',
+    category: 'passive',
+    tags: ['proyectiles', 'cadena'],
+    maxStack: 1,
+    // Hook en EnemySystem projectile overlap; isSecondary guard — nuevo (fase E2)
+  },
+  {
+    id: 'singularidad',
+    name: 'Singularidad',
+    description: 'Cada 30 kills: crea un agujero negro en tu posición 3s que atrae y daña a los enemigos cercanos.',
+    rarity: 'legendary',
+    category: 'passive',
+    tags: ['aoe', 'control'],
+    maxStack: 1,
+    // enemy:killed counter → singularidadKills; pull loop en GameScene/EnemySystem — nuevo (fase E2)
+  },
+
+  // ── §E1 NUEVOS LEGENDARIOS (2) ──────────────────────────────────────────────
 
   {
     id: 'modo_dios_temporal',

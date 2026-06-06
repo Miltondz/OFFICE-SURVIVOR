@@ -10,7 +10,7 @@ export type GameEventName =
   | 'wave:announce' | 'miniboss:announce' | 'miniboss:spawn' | 'miniboss:defeated' | 'miniboss:spawnZone'
   | 'pickup:collected' | 'boss:spawned' | 'boss:phase2' | 'boss:defeated'
   | 'damage:dealt' | 'item:acquired' | 'upgrade:weapon_selected' | 'upgrade:item_selected'
-  | 'playerUpgrade:selected' | 'shop:closed' | 'boss:hp' | 'curse:applied';
+  | 'playerUpgrade:selected' | 'shop:closed' | 'boss:hp' | 'curse:applied' | 'weapon:sell';
 
 export interface CharacterDefinition {
   id: string;
@@ -60,6 +60,7 @@ export interface RunModifiers {
   regenHpPerS: number;          // HP regenerated per second passively
   stressRiseMult: number;       // multiplier on all stress accrual (stacks with metaStressMult)
   pickupRange: number;          // extra pickup detection radius in px
+  wallBounce: number;           // §E2 rebote_de_pared: extra wall-bounce budget (0 = no wall bounce)
 }
 
 export function defaultRunModifiers(): RunModifiers {
@@ -69,6 +70,7 @@ export function defaultRunModifiers(): RunModifiers {
     maxWeapons: 4, xpMult: 1, coinMult: 1,
     fireRateMult: 1, critBonus: 0, regenHpPerS: 0,
     stressRiseMult: 1, pickupRange: 0,
+    wallBounce: 0,
   };
 }
 
@@ -159,6 +161,13 @@ export interface SaveData {
     musicVolume: number;          // 0–1
     sfxVolume: number;            // 0–1
     uiVolume: number;             // 0–1
+    // FASE H — display / accessibility settings
+    fullscreen: boolean;          // default false
+    zoom: number;                 // 0 = auto/FIT, 1..3 = setZoom ; default 0
+    smoothing: boolean;           // true = LINEAR antialias (applies on restart) ; default false
+    screenShake: number;          // 0..1 multiplier on shake intensity ; default 1
+    vignette: boolean;            // show burnout vignette flash ; default true
+    damageNumbers: boolean;       // show floating damage numbers ; default true
   };
 }
 

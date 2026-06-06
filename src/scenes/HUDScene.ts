@@ -1,6 +1,6 @@
 // src/scenes/HUDScene.ts
 import Phaser from 'phaser';
-import { SCENES, GAME, HUD, STRESS_COLORS, RUN_DURATION_S, WAVES } from '@/config/game.config';
+import { SCENES, GAME, HUD, STRESS_COLORS, RUN_DURATION_S, WAVES, COMBAT } from '@/config/game.config';
 import type { WaveType } from '@/config/game.config';
 import type { RunContext } from '@/systems/RunContext';
 import { LevelSystem } from '@/systems/LevelSystem';
@@ -12,12 +12,29 @@ import { iconKey } from '@/config/icons.config';
 const STRESS_AR = 203 / 1292;
 const HP_BAR_H = 16;
 
-// §7.8 — Inventario en columna vertical (1 columna)
+// §7.8 — Inventario en columna vertical (multi-columna cuando se llena)
 const INV_X = 16;
-const INV_Y = 116;
 const INV_SIZE = 28;
 const INV_GAP = 5;
-const INV_COLS = 1;   // §7.8: era 2
+// INV_Y and INV_COLS are now derived dynamically (see STATS_PANEL_* and rebuildInventory)
+
+// §T2 — Panel de stats (DERECHA, bajo las monedas)
+const STATS_PANEL_W = 148;        // panel width
+const STATS_PANEL_X = GAME.WIDTH - STATS_PANEL_W - 8;   // borde derecho
+const STATS_PANEL_Y = 32;         // bajo las monedas (y≈16)
+const STATS_LINE_H = 13;          // px per stat line
+const STATS_FONT_SIZE = '10px';
+const STATS_LABEL_COLOR = '#aabbcc';
+const STATS_VALUE_COLOR = '#ffffff';
+const STATS_COUNT = 10;           // number of stat rows
+const STATS_PANEL_PAD = 5;        // inner padding (top/bottom each)
+const STATS_PANEL_H = STATS_COUNT * STATS_LINE_H + STATS_PANEL_PAD * 2;
+
+// Inventario en la IZQUIERDA, bajo las barras de HP/stress (independiente del panel de stats)
+const INV_Y = 112;
+// Bottom of usable area: just above XP bar (H - 24 - 14 = 502)
+const INV_BOTTOM = GAME.HEIGHT - 38;
+const INV_ROWS_PER_COL = Math.max(1, Math.floor((INV_BOTTOM - INV_Y) / (INV_SIZE + INV_GAP)));
 
 // Barra de XP
 const XP_W = 360;
@@ -98,6 +115,10 @@ export class HUDScene extends Phaser.Scene {
 
   // Countdown display (§7.5 intermission)
   private countdownText!: Phaser.GameObjects.Text;
+
+  // §T2 — Stats panel
+  private statsLabels: Phaser.GameObjects.Text[] = [];  // label texts (static)
+  private statsValues: Phaser.GameObjects.Text[] = [];  // value texts (updated per frame)
 
   // Inventario
   private invObjects: Phaser.GameObjects.GameObject[] = [];
@@ -221,6 +242,36 @@ export class HUDScene extends Phaser.Scene {
       fontSize: '10px', color: '#cfe8ff', stroke: '#000000', strokeThickness: 2,
     }).setOrigin(0.5).setDepth(3);
 
+    // ---- §T2.1 — Left stats panel ----
+    this.add
+      .rectangle(STATS_PANEL_X, STATS_PANEL_Y, STATS_PANEL_W, STATS_PANEL_H, 0x000020, 0.72)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, 0x334466)
+      .setScrollFactor(0)
+      .setDepth(3);
+
+    const STAT_LABELS = [
+      'Vida', 'Daño', 'Vel', 'Cadencia',
+      'Crítico', 'Proyectiles', 'Rango', 'Daño recib.',
+      'Regen', 'Recogida',
+    ] as const;
+
+    STAT_LABELS.forEach((label, i) => {
+      const ly = STATS_PANEL_Y + STATS_PANEL_PAD + i * STATS_LINE_H;
+      this.statsLabels.push(
+        this.add.text(STATS_PANEL_X + STATS_PANEL_PAD, ly, `${label}:`, {
+          fontSize: STATS_FONT_SIZE, color: STATS_LABEL_COLOR,
+          stroke: '#000000', strokeThickness: 1,
+        }).setOrigin(0, 0).setScrollFactor(0).setDepth(4),
+      );
+      this.statsValues.push(
+        this.add.text(STATS_PANEL_X + STATS_PANEL_W - STATS_PANEL_PAD, ly, '', {
+          fontSize: STATS_FONT_SIZE, color: STATS_VALUE_COLOR,
+          stroke: '#000000', strokeThickness: 1,
+        }).setOrigin(1, 0).setScrollFactor(0).setDepth(4),
+      );
+    });
+
     // ---- Tooltip (oculto) ----
     this.tipBg = this.add.rectangle(0, 0, 10, 10, 0x000000, 0.9).setOrigin(0, 0).setStrokeStyle(1, 0x6666aa).setDepth(40).setVisible(false);
     this.tipText = this.add.text(0, 0, '', {
@@ -328,6 +379,9 @@ export class HUDScene extends Phaser.Scene {
 
     // Coins
     this.coinText.setText(`🪙 ${p.coins}`);
+
+    // §T2.1 — Live stats panel
+    this.updateStatsPanel();
 
     // Timer
     const remaining = Math.max(0, RUN_DURATION_S - this.ctx.elapsedS);
@@ -488,9 +542,9 @@ export class HUDScene extends Phaser.Scene {
 
     const ids = [...this.ctx.player.weapons, ...this.ctx.player.items];
     ids.forEach((id, i) => {
-      // §7.8 — single column (INV_COLS=1)
-      const col = i % INV_COLS;
-      const row = Math.floor(i / INV_COLS);
+      // §T2.2 — multi-column: fill column top-to-bottom, then spill into next column to the right
+      const col = Math.floor(i / INV_ROWS_PER_COL);
+      const row = i % INV_ROWS_PER_COL;
       const x = INV_X + col * (INV_SIZE + INV_GAP);
       const y = INV_Y + row * (INV_SIZE + INV_GAP);
 
@@ -499,17 +553,47 @@ export class HUDScene extends Phaser.Scene {
 
       const key = iconKey(id);
       if (this.textures.exists(key)) {
-        this.invObjects.push(this.add.image(x + INV_SIZE / 2, y + INV_SIZE / 2, key).setDisplaySize(INV_SIZE - 4, INV_SIZE - 4).setDepth(5));
+        this.invObjects.push(
+          this.add.image(x + INV_SIZE / 2, y + INV_SIZE / 2, key)
+            .setDisplaySize(INV_SIZE - 4, INV_SIZE - 4)
+            .setDepth(5),
+        );
       } else {
-        this.invObjects.push(this.add.text(x + INV_SIZE / 2, y + INV_SIZE / 2, id.slice(0, 3), { fontSize: '8px', color: '#99a' }).setOrigin(0.5).setDepth(5));
+        this.invObjects.push(
+          this.add.text(x + INV_SIZE / 2, y + INV_SIZE / 2, '◆', { fontSize: '10px', color: '#99aacc' })
+            .setOrigin(0.5)
+            .setDepth(5),
+        );
       }
 
-      // Tooltip hitzone — §7.8 tooltip stays to the right (x + INV_SIZE + 4)
+      // Tooltip hitzone — show to the right of the icon (account for multi-column offset)
+      const tooltipX = x + INV_SIZE + 4;
       const hit = this.add.rectangle(x, y, INV_SIZE, INV_SIZE, 0x000000, 0).setOrigin(0, 0).setInteractive({ useHandCursor: true }).setDepth(6);
-      hit.on('pointerover', () => this.showTooltip(id, x + INV_SIZE + 4, y));
+      hit.on('pointerover', () => this.showTooltip(id, tooltipX, y));
       hit.on('pointerout', () => this.hideTooltip());
       this.invObjects.push(hit);
     });
+  }
+
+  // §T2.1 — update live stats values each frame
+  private updateStatsPanel(): void {
+    const p = this.ctx.player;
+    const m = this.ctx.modifiers;
+    const effectiveDmg = p.damageMultiplier * m.damageMult;
+    const critPct = Math.round((COMBAT.CRIT_CHANCE + m.critBonus) * 100);
+    const values = [
+      `${Math.floor(p.hp)}/${p.maxHp}`,
+      `×${effectiveDmg.toFixed(2)}`,
+      `${Math.round(p.speed)}`,
+      `×${m.fireRateMult.toFixed(2)}`,
+      `${critPct}%`,
+      `+${m.projectileBonus}`,
+      `×${m.rangeMult.toFixed(2)}`,
+      `×${m.damageTakenMult.toFixed(2)}`,
+      `${m.regenHpPerS}/s`,
+      `+${m.pickupRange}px`,
+    ];
+    values.forEach((v, i) => { this.statsValues[i].setText(v); });
   }
 
   private lookup(id: string): { name: string; desc: string } {

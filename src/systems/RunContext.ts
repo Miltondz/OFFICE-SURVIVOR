@@ -38,6 +38,15 @@ export interface RunContext {
   modoDiosActive: boolean;                // modo_dios_temporal: currently in god mode
   modoDiosDamageBoost: boolean;           // modo_dios_temporal: flag read by WeaponSystem for ×5 dmg
   tripleEspressoSpeedBonus: number;       // triple_espresso: current speed bonus applied to player.speed
+  // §E2 — state fields for new items — nuevo (fase E2)
+  secondHeartUsed: boolean;               // segundo_corazon: true after second heart already consumed once
+  secondHeartHp: number;                  // segundo_corazon: current second-heart HP (0 = not active)
+  teleportCooldownMs: number;             // teletransporte: ms remaining before next allowed teleport
+  cronometroBalaUsed: boolean;            // cronometro_bala: true after the one-shot time-slow was triggered
+  cableTrapCooldownMs: number;            // cable_trampa: ms remaining on global stun cooldown
+  singularidadKills: number;              // singularidad: total kills since last singularity trigger
+  singularidadActive: boolean;            // singularidad: currently in pull/damage phase
+  fotocopiadoraArmasUsed: boolean;        // fotocopiadora_armas: true after the one-shot duplication fired
 }
 
 export function createRunContext(): RunContext {
@@ -96,6 +105,15 @@ export function createRunContext(): RunContext {
     modoDiosActive: false,
     modoDiosDamageBoost: false,
     tripleEspressoSpeedBonus: 0,
+    // §E2 — nuevo (fase E2)
+    secondHeartUsed: false,
+    secondHeartHp: 0,
+    teleportCooldownMs: 0,
+    cronometroBalaUsed: false,
+    cableTrapCooldownMs: 0,
+    singularidadKills: 0,
+    singularidadActive: false,
+    fotocopiadoraArmasUsed: false,
   };
 }
 
