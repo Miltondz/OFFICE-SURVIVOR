@@ -81,6 +81,7 @@ export const WAVES = {
   BONUS_DESPAWN_S: 20,
   // §B — elite_only: budget fraction (reduced count)
   ELITE_ONLY_BUDGET_MULT: 0.6,
+  ENEMY_HP_SCALE_PER_WAVE: 0.06,  // HP enemigo +6% por oleada; evita que el mid se trivialice con 3-4 armas (balance v2)
 } as const;
 
 export const PROGRESSION = {
@@ -90,7 +91,7 @@ export const PROGRESSION = {
   // §7.6 super-linear XP curve
   XP_BASE: 40,           // era 26 — W1 daba 3–4 niveles; con XP_BASE más alto el nivel 1 cuesta más (balance B2)
   XP_EXP: 1.55,          // era 1.45 — curva más pronunciada para frenar niveles tempranos (balance B2)
-  XP_KILL_MULT: 1,       // era 2 — multiplicador reducido: cada kill da menos XP en oleadas tempranas (balance B2)
+  XP_KILL_MULT: 1.5,     // era 1 — la curva B2 quedó demasiado lenta: nivel 1 pedía 20 kills; objetivo ~1 nivel en W1 (balance v2)
 } as const;
 
 export const ECONOMY = {
@@ -116,6 +117,7 @@ export const SCENES = {
   BUILD_REPORT: 'BuildReportScene',
   PAUSE: 'PauseScene',
   SHOP: 'ShopOverlay',
+  INVENTORY: 'InventoryScene',
 } as const;
 
 export const SHOP = {
@@ -170,7 +172,7 @@ export const MAP = {
   CENTER_EXCLUSION: 130,            // keep obstacles away from player spawn (center)
   COFFEE_MACHINE_INTERVAL_S: 45,
   VENDING_COST: 15,
-  VENDING_COOLDOWN_S: 60,
+  VENDING_COOLDOWN_S: 90,  // era 60 — el vending automático regalaba ítems muy seguido (balance v2)
   VENDING_RANGE: 52,
   EXTINTOR_STRESS: 25,
   DESK: { w: 78, h: 40, color: 0x6b5030 },   // era w:64,h:32 — collider agrandado acorde al sprite mayor (balance v2)
@@ -185,6 +187,19 @@ export const MAP = {
   // El collider sigue usando w/h de arriba (gameplay); el sprite es solo visual y puede ser mayor.
   SPRITE_H: { desk: 56, cabinet: 64, plant: 54, coffee: 36, vending: 86, extintor: 40 },
   // desk: era 46 — escritorios más grandes (balance v2); coffee: era 56 — cafetera era enorme (balance v2)
+} as const;
+
+// §G — Minimap (esquina inferior derecha, pantalla fija). Muestra jugador + enemigos.
+export const MINIMAP = {
+  W: 120,
+  H: 68,
+  MARGIN: 8,
+  BG_ALPHA: 0.5,
+  DOT: 2,
+  PLAYER_COLOR: 0x4caf50,
+  ENEMY_COLOR: 0xff5555,
+  ELITE_COLOR: 0xaa33aa,
+  BOSS_COLOR: 0xffcc00,
 } as const;
 
 export const CURSES = {
@@ -211,7 +226,7 @@ export const COLORS = {
 
 export const COMBAT = {
   PROJECTILE_POOL_SIZE: 200,
-  ENEMY_POOL_SIZE: 300,
+  ENEMY_POOL_SIZE: 1000,             // era 300 — soportar ~1000 enemigos (perf)
   MAX_PASSIVE_ITEMS: 6,           // tope de ítems pasivos equipados; consumables/weapons no cuentan (fase D.3)
   PROJECTILE_DEFAULT_SPEED: 360,    // px/s for standard bullets
   PROJECTILE_LIFESPAN_MS: 2000,
@@ -243,6 +258,37 @@ export const SPAWN = {
   POLISH_RADIUS: 26,
   POLISH_DPS: 6,
   POLISH_DURATION_MS: 4000,
+} as const;
+
+// ─── Arquetipos de movimiento de enemigos ─────────────────────────────────────
+export const ARCHETYPE = {
+  SINE_FREQ: 8,             // rad/s — frecuencia del seno lateral (stress_ball)
+  SINE_AMPLITUDE: 60,       // px/s perpendicular — amplitud de la onda (stress_ball)
+  ANGRY_CLIENT_RAGE_K: 0.8, // a 0 HP → speed ×(1 + k) = ×1.8 (acceleración de furia)
+  // §T2 — zoom_bomb dash (Ticket 2)
+  ZOOM_DASH_SPEED: 420,     // px/s — velocidad fija durante el dash (no re-targetea)
+} as const;
+
+// ─── §T2 — Nuevos comportamientos de enemigos (Ticket 2) ──────────────────────
+export const ENEMY_BEHAVIORS = {
+  // micromanager: aura que lentifica la cadencia de fuego del jugador
+  MICROMANAGER_AURA_RADIUS: 140,      // px — radio del aura
+  MICROMANAGER_FIRERATE_SLOW: 0.30,   // fracción de reducción → cadencia ×0.70
+  // neg_balloon: zona de negatividad al morir
+  NEG_BALLOON_ZONE_RADIUS: 36,        // px
+  NEG_BALLOON_ZONE_DPS: 6,            // daño por segundo dentro de la zona
+  NEG_BALLOON_ZONE_DUR_MS: 4000,      // duración de la zona (ms)
+  // cleaning_lady: knockback de contacto
+  CLEANING_KNOCKBACK_FORCE: 320,      // px/s — impulso al jugador al ser golpeado
+  CLEANING_KNOCKBACK_DUR_MS: 150,     // ms que dura el impulso antes de volver a 0
+} as const;
+
+// ─── Culling por distancia + reposición (perf) ───────────────────────────────
+export const CULL = {
+  DESPAWN_DIST: 2000,          // px — enemies beyond this are repositioned (perf)
+  CULL_INTERVAL_FRAMES: 60,    // run culling pass every N frames (perf)
+  REPOSITION_AHEAD_PX: 700,    // px ahead of player movement direction (perf)
+  REPOSITION_SPREAD_PX: 400,   // px random lateral spread on reposition (perf)
 } as const;
 
 export const BOSS = {
@@ -448,7 +494,7 @@ export const PICKUPS = {
   STRESS_PICKUP_DECREASE: 10,      // reunion_cancelada drop
   SPAWN_MARGIN: 60,                // min distance from edges for pickup spawn
   // §7.4 enemy death drops
-  ITEM_DROP_CHANCE: 0.04,          // probability on normal enemy death
+  ITEM_DROP_CHANCE: 0.03,          // era 0.04 — menos cofres, sobre todo en swarm (balance v2)
   ITEM_DROP_ELITE_MULT: 3,         // élite ×3 chance
   UPGRADE_DROP_CHANCE: 0.015,      // upgrade star drop chance
 } as const;
@@ -511,6 +557,7 @@ export const ITEMS_E1 = {
   DOBLE_DISPARO_CHANCE: 0.25,       // nuevo (fase E1)
   // cadena_de_kills: +2% daño acumulativo por kill sin daño — nuevo (fase E1)
   CADENA_DAMAGE_PER_KILL: 0.02,     // nuevo (fase E1)
+  CADENA_MAX_BONUS: 1.5,            // tope +150% — antes sin cap (balance v3 batch2): swarm hacía +176%+ infinito
   // explosion_al_matar: AoE 150px por 50% HP élite — nuevo (fase E1)
   EXPLOSION_RADIUS: 150,            // nuevo (fase E1)
   EXPLOSION_DAMAGE_FRAC: 0.50,      // fracción del HP del élite como daño AoE — nuevo (fase E1)

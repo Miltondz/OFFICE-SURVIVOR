@@ -29,10 +29,10 @@ export const WEAPONS: WeaponDefinition[] = [
   {
     id: 'debug_laser',
     name: 'Debug Laser',
-    description: 'Haz continuo. 5 daño/tick a 10/s.',
+    description: 'Haz continuo. 5 daño/tick a 7/s.',
     rarity: 'rare',
     baseDamage: 5,
-    fireRate: 10,
+    fireRate: 7,  // era 10 — DPS 50→35; sigue siendo el raro de alcance (balance v2)
     range: 400,
     projectileCount: 1,
     tags: ['continuo', 'arma', 'laser'],
@@ -40,12 +40,12 @@ export const WEAPONS: WeaponDefinition[] = [
   {
     id: 'postit_launcher',
     name: 'Post-it Launcher',
-    description: 'Dispara 3 proyectiles en abanico.',
+    description: 'Dispara 2 proyectiles en abanico.',
     rarity: 'common',
     baseDamage: 6,
     fireRate: 2,
     range: 250,
-    projectileCount: 3,
+    projectileCount: 2,  // era 3 — DPS 36→24; común no debe superar a raros (balance v2)
     tags: ['proyectiles', 'arma'],
   },
   {
@@ -54,7 +54,7 @@ export const WEAPONS: WeaponDefinition[] = [
     description: 'Proyectil lento con alto daño. Aturde 1.5s.',
     rarity: 'rare',
     baseDamage: 35,
-    fireRate: 0.3,
+    fireRate: 0.5,  // era 0.3 — DPS 10.5→17.5; raro usable (balance v2)
     range: 350,
     projectileCount: 1,
     tags: ['stun', 'arma', 'lento'],
@@ -97,7 +97,7 @@ export const WEAPONS: WeaponDefinition[] = [
     name: 'Extintor',
     description: 'Cono frontal. Congela 2s. Recarga 5s.',
     rarity: 'rare',
-    baseDamage: 8,
+    baseDamage: 12,  // era 8 — raro con más pegada base; conserva su zona (balance v2)
     fireRate: 1,
     range: 200,
     projectileCount: 1,
@@ -108,7 +108,7 @@ export const WEAPONS: WeaponDefinition[] = [
     name: 'Impresora Aliada',
     description: 'Invoca torreta autónoma que sigue al jugador.',
     rarity: 'epic',
-    baseDamage: 10,
+    baseDamage: 16,  // era 10 — épico debe pegar más; DPS torreta 20→32 (balance v2)
     fireRate: 2,
     range: 250,
     projectileCount: 1,

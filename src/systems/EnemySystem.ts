@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COMBAT, SPAWN, BOSS, ITEMS_E2 } from '@/config/game.config';
+import { COMBAT, SPAWN, BOSS, WAVES, ITEMS_E2, CULL, MAP, ENEMY_BEHAVIORS } from '@/config/game.config';
 import { CHAR } from '@/config/characters.config';
 import type { RunContext } from './RunContext';
 import type { EnemyType } from '@/types';
@@ -23,6 +23,12 @@ export class EnemySystem {
   // Track HR aura effect
   private hrAliveCount = 0;
 
+  // §T2 micromanager aura: per-frame flag set when any micromanager is in range (Ticket 2)
+  private _weaponSlowActive = false;
+
+  // Culling frame counter (perf)
+  private cullFrame = 0;
+
   constructor(scene: Phaser.Scene, ctx: RunContext) {
     this.scene = scene;
     this.ctx = ctx;
@@ -31,6 +37,15 @@ export class EnemySystem {
       if (p.type === 'hr_rep') this.hrAliveCount = Math.max(0, this.hrAliveCount - 1);
       if (p.type === 'toxic_manager') {
         this.spawnZone(p.x, p.y, 30, SPAWN.TOXIC_ZONE_DPS, SPAWN.TOXIC_ZONE_DURATION_MS);
+      }
+      // §T2 neg_balloon: zona de negatividad al morir (Ticket 2)
+      if (p.type === 'neg_balloon') {
+        this.spawnZone(
+          p.x, p.y,
+          ENEMY_BEHAVIORS.NEG_BALLOON_ZONE_RADIUS,
+          ENEMY_BEHAVIORS.NEG_BALLOON_ZONE_DPS,
+          ENEMY_BEHAVIORS.NEG_BALLOON_ZONE_DUR_MS,
+        );
       }
     });
   }
@@ -75,12 +90,15 @@ export class EnemySystem {
           this.weaponSys.spawnAvalanchaSecondary(enemy.x, enemy.y, proj.damage, proj.sourceId);
         }
 
-        // Knockback
+        // Knockback — scaled by knockbackResistance (0 = full push, 1 = immune)
         if (proj.effectTag === 'knockback') {
-          const angle = Phaser.Math.Angle.Between(this.playerRef.x, this.playerRef.y, enemy.x, enemy.y);
-          const body = enemy.body as Phaser.Physics.Arcade.Body;
-          body.setVelocity(Math.cos(angle) * 300, Math.sin(angle) * 300);
-          this.scene.time.delayedCall(200, () => { body.setVelocity(0, 0); });
+          const kbScale = 1 - (enemy.def.knockbackResistance ?? 0);
+          if (kbScale > 0) {
+            const angle = Phaser.Math.Angle.Between(this.playerRef.x, this.playerRef.y, enemy.x, enemy.y);
+            const body = enemy.body as Phaser.Physics.Arcade.Body;
+            body.setVelocity(Math.cos(angle) * 300 * kbScale, Math.sin(angle) * 300 * kbScale);
+            this.scene.time.delayedCall(200, () => { body.setVelocity(0, 0); });
+          }
         }
 
         if (proj.pierceLeft <= 0) {
@@ -105,6 +123,10 @@ export class EnemySystem {
 
         enemy.contactCooldown = COMBAT.CONTACT_DAMAGE_COOLDOWN_MS;
         this.playerRef.takeDamage(enemy.def.damage);
+        // §T2 cleaning_lady knockback: push player away on contact (keeps polish trail too) (Ticket 2)
+        if (enemy.def.id === 'cleaning_lady') {
+          this.playerRef.applyKnockback(enemy.x, enemy.y, ENEMY_BEHAVIORS.CLEANING_KNOCKBACK_FORCE);
+        }
       },
     );
 
@@ -165,6 +187,12 @@ export class EnemySystem {
       };
     }
 
+    // §2 per-wave HP scaling: +6% per wave; HP only, not damage; skip CEO (balance v2)
+    if (typeId !== 'ceo' && this.ctx.wave > 1) {
+      const waveHpMult = 1 + (this.ctx.wave - 1) * WAVES.ENEMY_HP_SCALE_PER_WAVE;
+      spawnDef = { ...spawnDef, hp: Math.ceil(spawnDef.hp * waveHpMult) };
+    }
+
     enemy.spawn(spawnDef, x, y, this.ctx);
     enemy.ally = false;
 
@@ -197,10 +225,23 @@ export class EnemySystem {
 
     // HR aura slow is applied in GameScene via the hrSlowActive getter.
 
-    // Printer fan attack + ally AI
-    this.enemyPool.getChildren().forEach(go => {
-      const e = go as Enemy;
-      if (!e.isActive2) return;
+    // §T2 micromanager aura: reset per-frame flag before scanning (Ticket 2)
+    this._weaponSlowActive = false;
+
+    // Printer fan attack + ally AI — indexed loop, no closure allocation (perf)
+    const children = this.enemyPool.getChildren();
+    const childCount = children.length;
+    for (let i = 0; i < childCount; i++) {
+      const e = children[i] as Enemy;
+      if (!e.isActive2) continue;
+
+      // §T2 micromanager aura: if any micromanager is within AURA_RADIUS of the player, slow weapon cadence (Ticket 2)
+      if (e.enemyType === 'micromanager') {
+        const dist = Phaser.Math.Distance.Between(e.x, e.y, this.playerRef.x, this.playerRef.y);
+        if (dist <= ENEMY_BEHAVIORS.MICROMANAGER_AURA_RADIUS) {
+          this._weaponSlowActive = true;
+        }
+      }
 
       // RRHH allies: chase nearest real enemy and damage it on contact.
       if (e.ally) {
@@ -216,13 +257,13 @@ export class EnemySystem {
         } else {
           body.setVelocity(0, 0);
         }
-        return;
+        continue;
       }
 
       // Off-screen skip
       const dx = e.x - this.playerRef.x;
       const dy = e.y - this.playerRef.y;
-      if (Math.abs(dx) > 600 || Math.abs(dy) > 600) return;
+      if (Math.abs(dx) > 600 || Math.abs(dy) > 600) continue;
 
       if (e.enemyType === 'possessed_printer') {
         e.fanTimer += delta;
@@ -247,27 +288,41 @@ export class EnemySystem {
           this.ctx.cableTrapCooldownMs = ITEMS_E2.CABLE_COOLDOWN_MS;
         }
       }
-    });
+    }
+
+    // Culling por distancia + reposición — every CULL_INTERVAL_FRAMES (perf)
+    this.cullFrame++;
+    if (this.cullFrame >= CULL.CULL_INTERVAL_FRAMES) {
+      this.cullFrame = 0;
+      this.runCullPass();
+    }
 
     // §E2 cable_trampa: tick cooldown — nuevo (fase E2)
     if (this.ctx.cableTrapCooldownMs > 0) {
       this.ctx.cableTrapCooldownMs -= delta;
     }
 
-    // Damage zones DPS to player
-    this.zonePool.getChildren().forEach(go => {
-      const z = go as DamageZone;
-      if (!z.active) return;
+    // Damage zones DPS to player — indexed loop (perf)
+    const zones = this.zonePool.getChildren();
+    const zoneCount = zones.length;
+    for (let i = 0; i < zoneCount; i++) {
+      const z = zones[i] as DamageZone;
+      if (!z.active) continue;
       const dist = Phaser.Math.Distance.Between(z.x, z.y, this.playerRef.x, this.playerRef.y);
       const radius = z.width / 2;
       if (dist < radius) {
         this.playerRef.takeDamage(z.dps * delta / 1000);
       }
-    });
+    }
   }
 
   get hrSlowActive(): boolean {
     return this.hrAliveCount > 0 && !this.ctx.player.items.includes('ndas_firmadas');
+  }
+
+  /** §T2 micromanager aura: true when any micromanager is within aura radius of the player (Ticket 2). */
+  get weaponSlowActive(): boolean {
+    return this._weaponSlowActive;
   }
 
   private firePrinterFan(printer: Enemy, _time: number): void {
@@ -291,9 +346,12 @@ export class EnemySystem {
     let nearest: Enemy | null = null;
     let bestDist = maxRange * maxRange;
 
-    this.enemyPool.getChildren().forEach(go => {
-      const e = go as Enemy;
-      if (!e.isActive2 || e.ally) return;   // allies aren't valid targets
+    // Indexed loop — avoids closure allocation on every frame (perf)
+    const ch = this.enemyPool.getChildren();
+    const len = ch.length;
+    for (let i = 0; i < len; i++) {
+      const e = ch[i] as Enemy;
+      if (!e.isActive2 || e.ally) continue;   // allies aren't valid targets
       const dx = e.x - x;
       const dy = e.y - y;
       const d2 = dx * dx + dy * dy;
@@ -301,19 +359,24 @@ export class EnemySystem {
         bestDist = d2;
         nearest = e;
       }
-    });
+    }
     return nearest;
   }
 
   damageInRadius(cx: number, cy: number, radius: number, damage: number, sourceId: string): void {
-    this.enemyPool.getChildren().forEach(go => {
-      const e = go as Enemy;
-      if (!e.isActive2) return;
-      const dist = Phaser.Math.Distance.Between(cx, cy, e.x, e.y);
-      if (dist <= radius) {
+    const radiusSq = radius * radius;
+    // Indexed loop — avoids closure allocation (perf)
+    const ch = this.enemyPool.getChildren();
+    const len = ch.length;
+    for (let i = 0; i < len; i++) {
+      const e = ch[i] as Enemy;
+      if (!e.isActive2) continue;
+      const dx = e.x - cx;
+      const dy = e.y - cy;
+      if (dx * dx + dy * dy <= radiusSq) {
         e.takeDamage(damage, sourceId);
       }
-    });
+    }
   }
 
   /**
@@ -326,9 +389,12 @@ export class EnemySystem {
     const dy = y2 - y1;
     const lenSq = dx * dx + dy * dy;
 
-    this.enemyPool.getChildren().forEach(go => {
-      const e = go as Enemy;
-      if (!e.isActive2) return;
+    // Indexed loop — avoids closure allocation (perf)
+    const ch = this.enemyPool.getChildren();
+    const len = ch.length;
+    for (let i = 0; i < len; i++) {
+      const e = ch[i] as Enemy;
+      if (!e.isActive2) continue;
 
       // Project enemy position onto the line segment
       const t = lenSq > 0
@@ -340,14 +406,16 @@ export class EnemySystem {
       if (dist <= halfW) {
         e.takeDamage(damage, sourceId, isCritical);
       }
-    });
+    }
   }
 
   killAll(): void {
-    this.enemyPool.getChildren().forEach(go => {
-      const e = go as Enemy;
+    const ch = this.enemyPool.getChildren();
+    const len = ch.length;
+    for (let i = 0; i < len; i++) {
+      const e = ch[i] as Enemy;
       if (e.isActive2) e.deactivate();
-    });
+    }
   }
 
   private spawnZone(x: number, y: number, radius: number, dps: number, durationMs: number): void {
@@ -356,7 +424,14 @@ export class EnemySystem {
   }
 
   getActiveCount(): number {
-    return this.enemyPool.getChildren().filter(g => (g as Enemy).isActive2).length;
+    // Manual indexed loop — avoids filter() array allocation every frame (perf)
+    const ch = this.enemyPool.getChildren();
+    const len = ch.length;
+    let count = 0;
+    for (let i = 0; i < len; i++) {
+      if ((ch[i] as Enemy).isActive2) count++;
+    }
+    return count;
   }
 
   /**
@@ -367,12 +442,16 @@ export class EnemySystem {
   applySingularidadPull(cx: number, cy: number, delta: number): void {
     const dps = ITEMS_E2.SINGULARIDAD_DPS;
     const pull = ITEMS_E2.SINGULARIDAD_PULL_FORCE;
-    const radius = ITEMS_E2.SINGULARIDAD_RADIUS;
-    this.enemyPool.getChildren().forEach(go => {
-      const e = go as Enemy;
-      if (!e.isActive2) return;
-      const dist = Phaser.Math.Distance.Between(cx, cy, e.x, e.y);
-      if (dist <= radius && dist > 1) {
+    const radiusSq = ITEMS_E2.SINGULARIDAD_RADIUS * ITEMS_E2.SINGULARIDAD_RADIUS;
+    const ch = this.enemyPool.getChildren();
+    const len = ch.length;
+    for (let i = 0; i < len; i++) {
+      const e = ch[i] as Enemy;
+      if (!e.isActive2) continue;
+      const edx = e.x - cx;
+      const edy = e.y - cy;
+      const distSq = edx * edx + edy * edy;
+      if (distSq <= radiusSq && distSq > 1) {
         // Pull: move enemy toward center
         const angle = Phaser.Math.Angle.Between(e.x, e.y, cx, cy);
         const step = pull * delta / 1000;
@@ -380,6 +459,74 @@ export class EnemySystem {
         // Damage DPS
         e.takeDamage(dps * delta / 1000, 'singularidad');
       }
-    });
+    }
+  }
+
+  /**
+   * Culling por distancia + reposición: enemies beyond DESPAWN_DIST are moved
+   * ahead of the player to maintain horde density. Runs every CULL_INTERVAL_FRAMES. (perf)
+   */
+  private runCullPass(): void {
+    const px = this.playerRef.x;
+    const py = this.playerRef.y;
+    const despawnSq = CULL.DESPAWN_DIST * CULL.DESPAWN_DIST;
+    const ahead = CULL.REPOSITION_AHEAD_PX;
+    const spread = CULL.REPOSITION_SPREAD_PX;
+    const margin = 60;
+
+    // Compute movement direction from player body velocity
+    const pbody = this.playerRef.body.body as Phaser.Physics.Arcade.Body;
+    const pvx = pbody.velocity.x;
+    const pvy = pbody.velocity.y;
+    const pSpeed = Math.sqrt(pvx * pvx + pvy * pvy);
+
+    let dirX: number;
+    let dirY: number;
+    if (pSpeed > 5) {
+      dirX = pvx / pSpeed;
+      dirY = pvy / pSpeed;
+    } else {
+      // Player nearly still: random direction
+      const rAngle = Math.random() * Math.PI * 2;
+      dirX = Math.cos(rAngle);
+      dirY = Math.sin(rAngle);
+    }
+
+    const ch = this.enemyPool.getChildren();
+    const len = ch.length;
+    for (let i = 0; i < len; i++) {
+      const e = ch[i] as Enemy;
+      if (!e.isActive2) continue;
+      // Never reposition allies (rrhh) — they have special AI
+      if (e.ally) continue;
+
+      const dx = e.x - px;
+      const dy = e.y - py;
+      if (dx * dx + dy * dy <= despawnSq) continue;
+
+      // Bonus enemies: just deactivate them instead of repositioning
+      if (e.isBonus) {
+        e.deactivate();
+        continue;
+      }
+
+      // Reposition ahead of the player with random perpendicular spread
+      const perpX = -dirY;
+      const perpY = dirX;
+      const lateralOffset = (Math.random() - 0.5) * spread;
+
+      const nx = Phaser.Math.Clamp(
+        px + dirX * ahead + perpX * lateralOffset,
+        margin,
+        MAP.WIDTH - margin,
+      );
+      const ny = Phaser.Math.Clamp(
+        py + dirY * ahead + perpY * lateralOffset,
+        margin,
+        MAP.HEIGHT - margin,
+      );
+
+      e.reposition(nx, ny);
+    }
   }
 }

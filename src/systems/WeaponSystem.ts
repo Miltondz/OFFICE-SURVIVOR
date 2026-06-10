@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COMBAT, SPAWN, COLORS_GAME, WAVE_EVENTS, CURSES, ITEMS_E1, ITEMS_E2 } from '@/config/game.config';
+import { COMBAT, SPAWN, COLORS_GAME, WAVE_EVENTS, CURSES, ITEMS_E1, ITEMS_E2, ENEMY_BEHAVIORS } from '@/config/game.config';
 import type { RunContext } from './RunContext';
 import type { WeaponDefinition } from '@/types';
 import { Projectile } from '@/entities/Projectile';
@@ -178,11 +178,15 @@ export class WeaponSystem {
       const ultimoMult = (this.ctx.player.items.includes('ultimo_cartucho')
         && this.ctx.player.hp / this.ctx.player.maxHp <= ITEMS_E1.ULTIMO_HP_THRESHOLD)
         ? ITEMS_E1.ULTIMO_FIRERATE_MULT : 1;
+      // §T2 micromanager aura: slow weapon cadence ×(1 - FIRERATE_SLOW) when aura is active (Ticket 2)
+      const micromanagerMult = this.enemySys.weaponSlowActive
+        ? (1 - ENEMY_BEHAVIORS.MICROMANAGER_FIRERATE_SLOW) : 1;
       const fireRate = def.fireRate
         * (1 + (inst.level - 1) * COMBAT.WEAPON_LEVEL_FIRERATE_STEP)
         * inst.fireRateMult
         * this.ctx.modifiers.fireRateMult  // §7.2 stat_firerate upgrade
-        * ultimoMult;
+        * ultimoMult
+        * micromanagerMult;
       const cooldown = 1000 / fireRate;
 
       if (time - inst.lastFiredAt < cooldown) continue;

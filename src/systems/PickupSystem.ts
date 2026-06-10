@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { PICKUPS, MAP, ITEMS_E1 } from '@/config/game.config';
+import { PICKUPS, MAP, ITEMS_E1, COMBAT } from '@/config/game.config';
+import { ITEMS } from '@/config/items.config';
 import type { RunContext } from './RunContext';
 import { Pickup } from '@/entities/Pickup';
 import type { PickupKind } from '@/entities/Pickup';
@@ -132,6 +133,13 @@ export class PickupSystem {
       const p = this.pickupPool.get(x, y) as Pickup | null;
       if (p) p.spawn(x, y, 'upgrade');
     } else if (r < (PICKUPS.UPGRADE_DROP_CHANCE + PICKUPS.ITEM_DROP_CHANCE) * mult) {
+      // §4 — no soltar cofre 'item' si el inventario pasivo está lleno (balance v2)
+      const passiveCount = this.ctx.player.items.filter(id => {
+        const def = ITEMS.find(i => i.id === id);
+        return def !== undefined && def.category !== 'consumable';
+      }).length;
+      if (passiveCount >= COMBAT.MAX_PASSIVE_ITEMS) return;
+
       const p = this.pickupPool.get(x, y) as Pickup | null;
       // Pre-elegir el ítem para mostrar su icono real en el cofre del mapa.
       const itemId = this.onItemPick ? this.onItemPick() : null;

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
-import { ENTITY_SIZES, COLORS_GAME, ECONOMY, FEEL, CURSES, PROGRESSION, WAVES } from '@/config/game.config';
-import { ENEMY_SHEET, ENEMY_DISPLAY_H, ENEMY_FRAME } from '@/config/enemies.config';
+import { ENTITY_SIZES, COLORS_GAME, ECONOMY, FEEL, CURSES, PROGRESSION, WAVES, ARCHETYPE } from '@/config/game.config';
+import { ENEMY_SHEET, ENEMY_DISPLAY_H, ENEMY_FRAME, ENEMY_COLOR } from '@/config/enemies.config';
 import type { EnemyDir } from '@/config/enemies.config';
 import type { EnemyDefinition, EnemyType } from '@/types';
 import type { RunContext } from '@/systems/RunContext';
@@ -24,6 +24,14 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
   // §B — bonus enemy flag
   isBonus = false;          // bonus waves: no contact damage, ×2 coins on death, auto-despawn 20s
   private bonusTimer = 0;   // ms remaining before auto-despawn (bonus enemies only)
+
+  // Archetype movement timer — incremented by delta each preUpdate; drives sinusoidal offset.
+  stateTimer = 0;
+
+  // §T2 zoom_bomb dash fields (Ticket 2): locked velocity set on first move, kept until reposition.
+  dashLocked = false;
+  dashVx = 0;
+  dashVy = 0;
 
   // For possessed_printer
   fanTimer = 0;
@@ -80,12 +88,19 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     this.lastHpShown = -1;
     this.isBonus = false;
     this.bonusTimer = 0;
+    this.stateTimer = 0;
+    // §T2 zoom_bomb: reset dash on spawn so first move re-locks (Ticket 2)
+    this.dashLocked = false;
+    this.dashVx = 0;
+    this.dashVy = 0;
 
     const size = def.isElite ? ENTITY_SIZES.ELITE : ENTITY_SIZES.ENEMY;
     this.setSize(size, size).setPosition(x, y);
 
-    // Color by type
-    if (def.id === 'auditor') {
+    // Color by type (§F: placeholder de color por id para enemigos sin hoja)
+    if (ENEMY_COLOR[def.id] !== undefined) {
+      this.baseColor = ENEMY_COLOR[def.id];
+    } else if (def.id === 'auditor') {
       this.baseColor = COLORS_GAME.AUDITOR;
     } else if (def.isElite) {
       this.baseColor = COLORS_GAME.ELITE;
@@ -127,8 +142,10 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     body.enable = true;
     body.reset(x, y);
 
-    this.hpBarBg.setActive(true).setVisible(true);
-    this.hpBar.setActive(true).setVisible(true);
+    // HP bars hidden at full HP — shown only when damaged or elite (perf)
+    const showBarOnSpawn = def.isElite;
+    this.hpBarBg.setActive(showBarOnSpawn).setVisible(showBarOnSpawn);
+    this.hpBar.setActive(showBarOnSpawn).setVisible(showBarOnSpawn);
   }
 
   /** Mark this enemy as a bonus enemy (dorado, sin daño, ×2 monedas, auto-despawn 20s). */
@@ -187,13 +204,21 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
     // Sprite animado sigue al cuerpo (pies en la base del rect)
     this.updateSprite();
 
-    // HP bar sync — sobre la cabeza del sprite si lo hay, si no sobre el rect
-    const ratio = Math.max(0, this.hp / this.maxHp);
+    // HP bar: show only when damaged or elite — saves ~2000 draw calls with 1000 enemies (perf)
     const bw = (this.def.isElite ? ENTITY_SIZES.ELITE : ENTITY_SIZES.ENEMY);
-    const displayH = ENEMY_DISPLAY_H[this.def.id] ?? bw * 1.5;
-    const by = this.hasSheet ? this.y + bw / 2 - displayH - 4 : this.y - bw / 2 - 6;
-    this.hpBarBg.setPosition(this.x, by).setSize(bw, 3);
-    this.hpBar.setPosition(this.x - (bw * (1 - ratio)) / 2, by).setSize(bw * ratio, 3);
+    const showBar = this.hp < this.maxHp || this.def.isElite;
+    if (showBar !== this.hpBarBg.visible) {
+      this.hpBarBg.setActive(showBar).setVisible(showBar);
+      this.hpBar.setActive(showBar).setVisible(showBar);
+    }
+    if (showBar) {
+      // HP bar sync — sobre la cabeza del sprite si lo hay, si no sobre el rect
+      const ratio = Math.max(0, this.hp / this.maxHp);
+      const displayH = ENEMY_DISPLAY_H[this.def.id] ?? bw * 1.5;
+      const by = this.hasSheet ? this.y + bw / 2 - displayH - 4 : this.y - bw / 2 - 6;
+      this.hpBarBg.setPosition(this.x, by).setSize(bw, 3);
+      this.hpBar.setPosition(this.x - (bw * (1 - ratio)) / 2, by).setSize(bw * ratio, 3);
+    }
 
     // excel_sheet: show exact HP label when item owned
     if (this.ctx.player.items.includes('excel_sheet')) {
@@ -223,6 +248,9 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
       return;
     }
 
+    // Advance archetype timer (ms → used by sinusoidal movement)
+    this.stateTimer += delta;
+
     const px = this.ctx.player.hp > 0 ? this.scene.data.get('playerX') as number : this.x;
     const py = this.ctx.player.hp > 0 ? this.scene.data.get('playerY') as number : this.y;
 
@@ -232,9 +260,55 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
       && Phaser.Math.Distance.Between(this.x, this.y, px, py) < CURSES.OPEN_OFFICE_AURA_RADIUS) {
       speed *= (1 - CURSES.OPEN_OFFICE_AURA_SLOW);
     }
+
+    // angry_client rage: speed increases as HP drops
+    //   effectiveSpeed = speed × (1 + (1 − hp/maxHp) × RAGE_K)
+    //   at full HP: ×1.0; at 0 HP: ×(1 + RAGE_K) = ×1.8
+    if (this.def.id === 'angry_client') {
+      const hpFrac = this.maxHp > 0 ? Math.max(0, this.hp / this.maxHp) : 0;
+      speed *= 1 + (1 - hpFrac) * ARCHETYPE.ANGRY_CLIENT_RAGE_K;
+    }
+
     const angle = Phaser.Math.Angle.Between(this.x, this.y, px, py);
-    const vx = Math.cos(angle) * speed;
-    const vy = Math.sin(angle) * speed;
+
+    const archetype = this.def.archetype ?? 'linear';
+    let vx: number;
+    let vy: number;
+
+    switch (archetype) {
+      case 'sinusoidal': {
+        // Straight tracking + perpendicular sine bobbing
+        const perp = angle + Math.PI / 2;
+        const off = Math.sin((this.stateTimer / 1000) * ARCHETYPE.SINE_FREQ) * ARCHETYPE.SINE_AMPLITUDE;
+        vx = Math.cos(angle) * speed + Math.cos(perp) * off;
+        vy = Math.sin(angle) * speed + Math.sin(perp) * off;
+        break;
+      }
+      case 'dash': {
+        // §T2 zoom_bomb: lock a dash target once on spawn (or after reposition), then keep fixed velocity.
+        // Does NOT re-track the player during the dash.
+        if (!this.dashLocked) {
+          // Aim slightly offset from exact player position for spread
+          const offsetX = (Math.random() - 0.5) * 60;
+          const offsetY = (Math.random() - 0.5) * 60;
+          const dashAngle = Phaser.Math.Angle.Between(this.x, this.y, px + offsetX, py + offsetY);
+          this.dashVx = Math.cos(dashAngle) * ARCHETYPE.ZOOM_DASH_SPEED;
+          this.dashVy = Math.sin(dashAngle) * ARCHETYPE.ZOOM_DASH_SPEED;
+          this.dashLocked = true;
+        }
+        vx = this.dashVx;
+        vy = this.dashVy;
+        break;
+      }
+      case 'juggernaut':
+      case 'linear':
+      default:
+        // Standard straight tracking (juggernaut differs only via knockbackResistance)
+        vx = Math.cos(angle) * speed;
+        vy = Math.sin(angle) * speed;
+        break;
+    }
+
     (this.body as Phaser.Physics.Arcade.Body).setVelocity(vx, vy);
   }
 
@@ -371,6 +445,22 @@ export class Enemy extends Phaser.GameObjects.Rectangle {
           this.setScale(1).setAlpha(1); // reset for next spawn
         },
       });
+    }
+  }
+
+  /**
+   * Teleport the enemy to (nx, ny) and sync the follower sprite.
+   * Used by the culling/reposition pass. (perf)
+   */
+  reposition(nx: number, ny: number): void {
+    this.setPosition(nx, ny);
+    (this.body as Phaser.Physics.Arcade.Body).reset(nx, ny);
+    this.contactCooldown = 0;
+    // §T2 zoom_bomb: unlock dash so it re-locks toward fresh player position (Ticket 2)
+    this.dashLocked = false;
+    if (this.sprite) {
+      const bw = (this.def.isElite ? ENTITY_SIZES.ELITE : ENTITY_SIZES.ENEMY);
+      this.sprite.setPosition(nx, ny + bw / 2);
     }
   }
 

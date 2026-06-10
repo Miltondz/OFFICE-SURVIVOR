@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { MAP } from '@/config/game.config';
+import { MAP, COMBAT } from '@/config/game.config';
+import { ITEMS } from '@/config/items.config';
 import { EFFECTS } from '@/config/effects.config';
 import type { RunContext } from './RunContext';
 import { recomputeModifiers } from './RunContext';
@@ -197,10 +198,20 @@ export class MapSystem {
     );
     if (picks.length === 0) return;
 
+    const pick = picks[0];
+
+    // §4 — vending respeta el tope de slots pasivos; no auto-compra si el inventario está lleno (balance v2)
+    if ('category' in pick && (pick as ItemDefinition).category !== 'consumable') {
+      const passiveCount = this.ctx.player.items.filter(id => {
+        const def = ITEMS.find(i => i.id === id);
+        return def !== undefined && def.category !== 'consumable';
+      }).length;
+      if (passiveCount >= COMBAT.MAX_PASSIVE_ITEMS) return;
+    }
+
     this.ctx.player.coins -= MAP.VENDING_COST;
     this.vendingCooldown = MAP.VENDING_COOLDOWN_S;
 
-    const pick = picks[0];
     if (!('category' in pick)) {
       this.ctx.bus.emit('upgrade:weapon_selected', { id: pick.id });
     } else {

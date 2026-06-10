@@ -7,15 +7,16 @@ import type { EnemySystem } from './EnemySystem';
 
 // Wave unlock table from Game Bible
 const WAVE_UNLOCK_TABLE: Record<number, EnemyType[]> = {
-  1: ['angry_email'],
-  2: ['angry_email'],
-  3: ['angry_email', 'toxic_manager', 'angry_client'],
-  4: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady'],
-  5: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer'],
-  6: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer'],
-  7: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor'],
-  8: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor'],
-  9: ['angry_email', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor'],
+  1: ['angry_email', 'spam_email'],
+  2: ['angry_email', 'spam_email', 'slack_ping', 'stress_ball', 'neg_balloon'],
+  3: ['angry_email', 'spam_email', 'slack_ping', 'stress_ball', 'neg_balloon', 'rolodex', 'toxic_manager', 'angry_client'],
+  4: ['angry_email', 'spam_email', 'slack_ping', 'stress_ball', 'neg_balloon', 'rolodex', 'toxic_manager', 'angry_client', 'cleaning_lady'],
+  5: ['angry_email', 'spam_email', 'slack_ping', 'stress_ball', 'neg_balloon', 'rolodex', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer'],
+  // §T2: zoom_bomb, micromanager, unpaid_intern unlock at wave 6 (mid tier) — Ticket 2
+  6: ['angry_email', 'spam_email', 'slack_ping', 'stress_ball', 'neg_balloon', 'rolodex', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'zoom_bomb', 'micromanager', 'unpaid_intern'],
+  7: ['angry_email', 'spam_email', 'slack_ping', 'stress_ball', 'neg_balloon', 'rolodex', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor', 'zoom_bomb', 'micromanager', 'unpaid_intern'],
+  8: ['angry_email', 'spam_email', 'slack_ping', 'stress_ball', 'neg_balloon', 'rolodex', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor', 'zoom_bomb', 'micromanager', 'unpaid_intern'],
+  9: ['angry_email', 'spam_email', 'slack_ping', 'stress_ball', 'neg_balloon', 'rolodex', 'toxic_manager', 'angry_client', 'cleaning_lady', 'hr_rep', 'possessed_printer', 'auditor', 'zoom_bomb', 'micromanager', 'unpaid_intern'],
 };
 
 type WaveState =

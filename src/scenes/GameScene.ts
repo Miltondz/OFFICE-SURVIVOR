@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SCENES, GAME, MAP, SPAWN, BOSS, FEEL, CURSES, MINIBOSS, ITEMS_E2, WAVES } from '@/config/game.config';
+import { SCENES, GAME, MAP, SPAWN, BOSS, FEEL, CURSES, MINIBOSS, ITEMS_E2, WAVES, MINIMAP } from '@/config/game.config';
 import { SceneManager } from '@/systems/SceneManager';
 import { EventBus } from '@/systems/EventBus';
 import { createRunContext, recomputeModifiers, applyCharacter } from '@/systems/RunContext';
@@ -62,6 +62,9 @@ export class GameScene extends Phaser.Scene {
   private vignetteRect!: Phaser.GameObjects.Rectangle;
   private vignetteTween: Phaser.Tweens.Tween | null = null;
 
+  // §G — Minimap (pantalla fija)
+  private minimapGfx!: Phaser.GameObjects.Graphics;
+
   private gameOver = false;
   private victory = false;
   private ipoActive = false;
@@ -73,6 +76,7 @@ export class GameScene extends Phaser.Scene {
   private readonly SHOOT_BEEP_MIN_MS = 125;
 
   private escKey!: Phaser.Input.Keyboard.Key;
+  private invKey!: Phaser.Input.Keyboard.Key;
 
   private selectedCharacterId = 'base';
 
@@ -216,6 +220,9 @@ export class GameScene extends Phaser.Scene {
       GAME.WIDTH, GAME.HEIGHT,
       0xff0000, 0,
     ).setScrollFactor(0).setDepth(50).setAlpha(0);
+
+    // §G — Minimap (pantalla fija, esquina inferior derecha)
+    this.minimapGfx = this.add.graphics().setScrollFactor(0).setDepth(48);
 
     // Launch HUD overlay — pass levelSys reference for XP display
     this.scene.launch(SCENES.HUD, { ctx: this.ctx, levelSys: this.levelSys });
@@ -375,6 +382,7 @@ export class GameScene extends Phaser.Scene {
     this.input.once('pointerdown', () => this.audio.resume());
 
     this.escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.invKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.I);
   }
 
   update(_time: number, delta: number): void {
@@ -383,6 +391,12 @@ export class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.escKey)) {
       this.scene.launch(SCENES.PAUSE);
       this.scene.pause();
+      return;
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.invKey)) {
+      this.scene.launch(SCENES.INVENTORY, { ctx: this.ctx });
+      if (this.scene.isActive()) this.scene.pause();
       return;
     }
 
@@ -403,6 +417,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnDir.update(delta);
     this.levelSys.update();
     this.waveEvents.update(delta);
+    this.drawMinimap();
     this.mapSys.update(delta);
 
     // §7.2 — passive HP regen from stat upgrades
@@ -629,6 +644,38 @@ export class GameScene extends Phaser.Scene {
         });
       },
     });
+  }
+
+  /** §G — Dibuja el minimap (pantalla fija): jugador, enemigos y jefe. */
+  private drawMinimap(): void {
+    const g = this.minimapGfx;
+    g.clear();
+    const w = MINIMAP.W, h = MINIMAP.H, m = MINIMAP.MARGIN, d = MINIMAP.DOT;
+    const x0 = GAME.WIDTH - w - m;
+    const y0 = GAME.HEIGHT - h - m;
+    g.fillStyle(0x000000, MINIMAP.BG_ALPHA);
+    g.fillRect(x0, y0, w, h);
+    g.lineStyle(1, 0x4a4a66, 0.8);
+    g.strokeRect(x0, y0, w, h);
+
+    const sx = w / MAP.WIDTH;
+    const sy = h / MAP.HEIGHT;
+
+    this.enemySys.enemyPool.getChildren().forEach(go => {
+      const e = go as import('@/entities/Enemy').Enemy;
+      if (!e.isActive2) return;
+      g.fillStyle(e.def.isElite ? MINIMAP.ELITE_COLOR : MINIMAP.ENEMY_COLOR, 1);
+      g.fillRect(x0 + e.x * sx - d / 2, y0 + e.y * sy - d / 2, d, d);
+    });
+
+    const bossBody = this.miniboss?.alive ? this.miniboss.body : (this.boss?.alive ? this.boss.body : null);
+    if (bossBody) {
+      g.fillStyle(MINIMAP.BOSS_COLOR, 1);
+      g.fillRect(x0 + bossBody.x * sx - 2, y0 + bossBody.y * sy - 2, 4, 4);
+    }
+
+    g.fillStyle(MINIMAP.PLAYER_COLOR, 1);
+    g.fillRect(x0 + this.player.x * sx - d / 2, y0 + this.player.y * sy - d / 2, d + 1, d + 1);
   }
 
   private spawnBoss(): void {

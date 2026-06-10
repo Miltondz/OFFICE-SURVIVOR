@@ -12,6 +12,7 @@ import { BuildReportScene } from '@/scenes/BuildReportScene';
 import { PauseScene } from '@/scenes/PauseScene';
 import { HUDScene } from '@/scenes/HUDScene';
 import { StatisticsScene } from '@/scenes/StatisticsScene';
+import { InventoryScene } from '@/scenes/InventoryScene';
 
 // FASE H — read smoothing setting before constructing Phaser.Game (applies at boot, not runtime)
 const { smoothing: _smoothing } = SaveManager.load().settings;
@@ -49,6 +50,7 @@ const config: Phaser.Types.Core.GameConfig = {
     PauseScene,
     HUDScene,       // registered but NOT auto-started — launched on demand by GameScene
     StatisticsScene,
+    InventoryScene,   // registered but NOT auto-started — launched with I key from GameScene
   ],
 };
 

@@ -1,7 +1,11 @@
 export type Rarity = 'common' | 'rare' | 'epic' | 'legendary';
 export type ItemCategory = 'passive' | 'consumable' | 'weapon';
 export type EnemyType = 'angry_email' | 'toxic_manager' | 'angry_client'
-  | 'hr_rep' | 'possessed_printer' | 'auditor' | 'cleaning_lady' | 'ceo';
+  | 'hr_rep' | 'possessed_printer' | 'auditor' | 'cleaning_lady' | 'ceo'
+  // §F — enemigos de bajo tier (placeholder de color hasta tener arte)
+  | 'spam_email' | 'slack_ping' | 'stress_ball' | 'neg_balloon' | 'rolodex'
+  // §T2 — nuevos enemigos (Ticket 2)
+  | 'zoom_bomb' | 'micromanager' | 'unpaid_intern';
 
 export type GameEventName =
   | 'player:hit' | 'player:died' | 'player:level_up' | 'player:burnout'
@@ -105,6 +109,8 @@ export interface WeaponDefinition {
   tags: string[];
 }
 
+export type EnemyArchetype = 'linear' | 'sinusoidal' | 'juggernaut' | 'dash';
+
 export interface EnemyDefinition {
   id: EnemyType;
   name: string;
@@ -113,6 +119,11 @@ export interface EnemyDefinition {
   damage: number;
   isElite: boolean;
   xpValue: number;        // calculado automáticamente: Math.round(hp / 10)
+  /** Perfil de movimiento. 'linear' (default) = tracking recto. 'sinusoidal' = seno lateral.
+   *  'juggernaut' = tracking recto + knockbackResistance alta (no rebota). */
+  archetype?: EnemyArchetype;
+  /** Resistencia al empuje: 0 = ninguna (default), 1 = inmune. Escala el vector de knockback. */
+  knockbackResistance?: number;
 }
 
 export interface PlayerState {

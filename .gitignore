@@ -3,3 +3,8 @@ dist/
 *.local
 .env
 .DS_Store
+
+# Windows reserved device name (phantom, breaks git add -A)
+nul
+# stray archive
+src/src.zip

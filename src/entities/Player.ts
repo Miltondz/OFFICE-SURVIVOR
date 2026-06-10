@@ -27,6 +27,10 @@ export class Player {
   private iFrameTimer = 0;
   private modoAvionTimer = 0;
   private modoAvionCooldown = 0;
+  // §T2 cleaning_lady knockback: short impulse applied each tick (Ticket 2)
+  private knockbackVx = 0;
+  private knockbackVy = 0;
+  private knockbackTimer = 0;
 
   constructor(scene: Phaser.Scene, ctx: RunContext) {
     this.scene = scene;
@@ -82,6 +86,17 @@ export class Player {
 
     this.body.x = Phaser.Math.Clamp(this.body.x + dx * speed * dtS, PLAYER_SIZE / 2, MAP.WIDTH - PLAYER_SIZE / 2);
     this.body.y = Phaser.Math.Clamp(this.body.y + dy * speed * dtS, PLAYER_SIZE / 2, MAP.HEIGHT - PLAYER_SIZE / 2);
+
+    // §T2 cleaning_lady knockback: apply impulse for its duration then zero it (Ticket 2)
+    if (this.knockbackTimer > 0) {
+      this.knockbackTimer -= delta;
+      this.body.x = Phaser.Math.Clamp(this.body.x + this.knockbackVx * dtS, PLAYER_SIZE / 2, MAP.WIDTH - PLAYER_SIZE / 2);
+      this.body.y = Phaser.Math.Clamp(this.body.y + this.knockbackVy * dtS, PLAYER_SIZE / 2, MAP.HEIGHT - PLAYER_SIZE / 2);
+      if (this.knockbackTimer <= 0) {
+        this.knockbackVx = 0;
+        this.knockbackVy = 0;
+      }
+    }
 
     // ---- Dirección + animación ----
     this.updateAnim(dx, dy);
@@ -203,6 +218,23 @@ export class Player {
   activateLineaDirecta(): void {
     this.ctx.player.hp = 1;
     this.ctx.player.items = this.ctx.player.items.filter(id => id !== 'linea_directa');
+  }
+
+  /**
+   * §T2 cleaning_lady knockback: push player away from source (srcX, srcY) at given force (px/s)
+   * for CLEANING_KNOCKBACK_DUR_MS ms. Stacks with any ongoing knockback by keeping the largest impulse.
+   * — Ticket 2
+   */
+  applyKnockback(srcX: number, srcY: number, force: number): void {
+    const angle = Phaser.Math.Angle.Between(srcX, srcY, this.body.x, this.body.y);
+    const newVx = Math.cos(angle) * force;
+    const newVy = Math.sin(angle) * force;
+    // Keep strongest impulse if already knocked back
+    if (this.knockbackTimer <= 0 || Math.abs(newVx) + Math.abs(newVy) > Math.abs(this.knockbackVx) + Math.abs(this.knockbackVy)) {
+      this.knockbackVx = newVx;
+      this.knockbackVy = newVy;
+    }
+    this.knockbackTimer = Math.max(this.knockbackTimer, 150); // era CLEANING_KNOCKBACK_DUR_MS (150ms)
   }
 
   faceToward(_tx: number, _ty: number): void {

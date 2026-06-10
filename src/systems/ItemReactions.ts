@@ -350,6 +350,9 @@ function _cadenaKillHandler(): void {
   if (!_cadenaCtx) return;
   const ctx = _cadenaCtx;
   if (!ctx.player.items.includes('cadena_de_kills')) return;
+  // Cap total bonus at CADENA_MAX_BONUS (balance v3 batch2) — antes era infinito
+  const currentBonus = Math.pow(1 + ITEMS_E1.CADENA_DAMAGE_PER_KILL, _cadenaStreak) - 1;
+  if (currentBonus >= ITEMS_E1.CADENA_MAX_BONUS) return;
   _cadenaStreak++;
   ctx.player.damageMultiplier *= (1 + ITEMS_E1.CADENA_DAMAGE_PER_KILL);
 }

@@ -8,15 +8,41 @@ export const def = (partial: Omit<EnemyDefinition, 'xpValue'>): EnemyDefinition 
 
 export const ENEMIES: EnemyDefinition[] = [
   def({ id: 'angry_email',       name: 'Angry Email',       hp: 20,  speed: 80,  damage: 5,  isElite: false }),
-  def({ id: 'toxic_manager',     name: 'Toxic Manager',     hp: 60,  speed: 50,  damage: 12, isElite: true  }),
-  def({ id: 'angry_client',      name: 'Angry Client',      hp: 40,  speed: 90,  damage: 8,  isElite: false }),
+  def({ id: 'toxic_manager',     name: 'Toxic Manager',     hp: 60,  speed: 50,  damage: 12, isElite: true,  archetype: 'juggernaut', knockbackResistance: 1.0 }),
+  def({ id: 'angry_client',      name: 'Angry Client',      hp: 40,  speed: 90,  damage: 8,  isElite: false, archetype: 'juggernaut', knockbackResistance: 1.0 }),
   def({ id: 'hr_rep',            name: 'HR Representative', hp: 35,  speed: 60,  damage: 10, isElite: true  }),
   def({ id: 'possessed_printer', name: 'Possessed Printer', hp: 120, speed: 30,  damage: 15, isElite: true  }),
-  def({ id: 'auditor',           name: 'Auditor',           hp: 80,  speed: 40,  damage: 20, isElite: true  }),
+  def({ id: 'auditor',           name: 'Auditor',           hp: 80,  speed: 40,  damage: 20, isElite: true,  archetype: 'juggernaut', knockbackResistance: 1.0 }),
   // Señora de Limpieza: lenta y resistente, empuja un carrito eléctrico de pulido que deja
   // rastro de piso pulido (zona eléctrica que daña). No élite.
   def({ id: 'cleaning_lady',     name: 'Señora de Limpieza', hp: 55,  speed: 42,  damage: 10, isElite: false }),
+  // §F — Bajo tier (hp ≤ 30 → elegibles para swarm). Placeholder de color hasta tener arte.
+  def({ id: 'spam_email',        name: 'Spam',               hp: 14,  speed: 95,  damage: 4,  isElite: false }),
+  def({ id: 'slack_ping',        name: 'Notificación Slack', hp: 10,  speed: 120, damage: 3,  isElite: false }),
+  def({ id: 'stress_ball',       name: 'Pelota Antiestrés',  hp: 22,  speed: 70,  damage: 6,  isElite: false, archetype: 'sinusoidal' }),
+  def({ id: 'neg_balloon',       name: 'Globo Negativo',     hp: 16,  speed: 55,  damage: 5,  isElite: false }),
+  def({ id: 'rolodex',           name: 'Rolodex',            hp: 28,  speed: 60,  damage: 8,  isElite: false }),
+  // §T2 — nuevos enemigos (Ticket 2)
+  // zoom_bomb: fodder que fija un dash diagonal a alta velocidad al spawnear, no re-targetea.
+  def({ id: 'zoom_bomb',         name: 'Zoom Bomba',          hp: 18,  speed: 90,  damage: 12, isElite: false, archetype: 'dash' }),
+  // micromanager: élite que aura-lentifica la cadencia de fuego del jugador.
+  def({ id: 'micromanager',      name: 'Micromanager',        hp: 45,  speed: 45,  damage: 6,  isElite: true  }),
+  // unpaid_intern: tracker rápido de baja HP — absorbe disparos delante de elites.
+  def({ id: 'unpaid_intern',     name: 'Becario Sin Pagar',   hp: 12,  speed: 140, damage: 5,  isElite: false }),
 ];
+
+// §F — color del placeholder (rect) para enemigos sin hoja de sprites, para distinguirlos.
+export const ENEMY_COLOR: Record<string, number> = {
+  spam_email: 0xdddddd,
+  slack_ping: 0x9b30a0,
+  stress_ball: 0xff9800,
+  neg_balloon: 0x3949ab,
+  rolodex: 0x795548,
+  // §T2 — placeholder de color (Ticket 2)
+  zoom_bomb: 0xff4444,        // rojo vivo — peligro rápido
+  micromanager: 0x7b1fa2,     // púrpura oscuro — élite opresora
+  unpaid_intern: 0xbdbdbd,    // gris pálido — carne de cañón
+};
 
 export function getEnemyById(id: string): EnemyDefinition | undefined {
   return ENEMIES.find(e => e.id === id);
